@@ -14,7 +14,6 @@ from ...helpers import (
     data_uri,
     fit_cover,
     read_rgba,
-    grid_overlay,
     fade_vertical,
     ambient_background,
     empty_image_placeholder,
@@ -226,7 +225,6 @@ async def _ambient_data(card: PreviewCard) -> str:
         blur=54,
         wash=(5, 7, 12, 155),
     )
-    background.alpha_composite(grid_overlay(background.size, 42))
     return data_uri(background)
 
 

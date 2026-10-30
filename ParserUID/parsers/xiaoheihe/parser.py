@@ -35,6 +35,7 @@ class XiaoheiheParser(BaseParser):
             self.headers["cookie"] = cookie
         self.client = XiaoheiheClient(
             headers=self.headers,
+            proxy=None,
             timeout=30,
             retries=2,
         )

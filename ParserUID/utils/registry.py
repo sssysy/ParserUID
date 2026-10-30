@@ -199,7 +199,13 @@ async def load_registry() -> RegistrySnapshot:
             if not user_config.enabled:
                 continue
 
-            instance = parser_cls(config=user_config)
+            try:
+                instance = parser_cls(config=user_config)
+            except Exception as exc:
+                logger.warning(
+                    f"[Parser·注册] 实例化失败被跳过 | name={child.name} | error={type(exc).__name__}",
+                )
+                continue
             active_parsers[child.name] = instance
             for kw, pattern in specs:
                 active_rules.append((kw, pattern, instance))

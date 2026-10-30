@@ -290,6 +290,15 @@ def test_all_24_migrated_parsers_registration() -> None:
             seen_keywords[kw] = p.name
 
 
+def test_xiaoheihe_parser_instantiates_without_proxy() -> None:
+    """小黑盒启用时不得因缺少代理参数导致注册表加载失败。"""
+    from ParserUID.parsers.xiaoheihe import XiaoheiheParser
+
+    parser = XiaoheiheParser()
+
+    assert parser.client.proxy is None
+
+
 def test_nested_plugin_import_uses_relative_package_name() -> None:
     """框架以 plugins.ParserUID.ParserUID 加载时，内部不能依赖顶层 ParserUID。"""
     plugin_root = Path(__file__).resolve().parent.parent
