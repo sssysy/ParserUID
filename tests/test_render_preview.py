@@ -22,6 +22,7 @@ from ParserUID.render.models import (
     CommentReply,
 )
 from ParserUID.render.runtime import render_preview
+from ParserUID.utils.exceptions import DownloadException
 from ParserUID.render.template_data import CARD_FOOTER
 from ParserUID.render.pack.default.context import prepare_context
 
@@ -122,6 +123,34 @@ def test_render_cache_is_content_addressed(tmp_path: Path) -> None:
     first = asyncio.run(render_preview(card))
     second = asyncio.run(render_preview(card))
     assert first == second
+
+
+def test_render_survives_avatar_download_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    failed_url = "http://i0.hdslb.com/bfs/face/failed.jpg"
+
+    async def fail_download(url: str) -> Path:
+        raise DownloadException(f"文件下载失败：{url}")
+
+    monkeypatch.setattr(render_runtime, "download_image", fail_download)
+    monkeypatch.setattr("ParserUID.render.pack.default.pipeline.download_image", fail_download)
+    card = _card(tmp_path)
+    card = PreviewCard(
+        platform_name=card.platform_name,
+        platform_display_name=card.platform_display_name,
+        title=card.title,
+        text=card.text,
+        author=Author(name="测试作者", avatar_url=failed_url),
+        timestamp=card.timestamp,
+        cover_path=card.cover_path,
+        blocks=card.blocks,
+        metrics=card.metrics,
+        comments=card.comments,
+        extra_info=card.extra_info,
+    )
+
+    path = asyncio.run(render_preview(card))
+
+    _assert_png(path)
 
 
 def test_clean_render_cache(tmp_path: Path) -> None:

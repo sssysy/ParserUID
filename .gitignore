@@ -3,6 +3,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pdm-python
-test/
 docs/
 .pytest_*/
+tests/

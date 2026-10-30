@@ -65,11 +65,11 @@ class DouYinParser(BaseParser):
         url = f"https://{searched.group(0)}"
         return await self.parse_with_redirect(url)
 
-    @handle("aweme_id", r"aweme_id[=:/s]+(?P<vid>d{10,})")
-    @handle("modal_id", r"modal_id=(?P<vid>d{10,})")
-    @handle("aweme", r"aweme/(?P<vid>d{10,})")
-    @handle("douyin", r"douyin\.com/(?P<ty>video|note|article)/(?P<vid>d+)")
-    @handle("m.douyin", r"m\.douyin\.com/share/(?P<ty>slides|video|note)/(?P<vid>d+)")
+    @handle("aweme_id", r"aweme_id[=:/s]+(?P<vid>\d{10,})")
+    @handle("modal_id", r"modal_id=(?P<vid>\d{10,})")
+    @handle("aweme", r"aweme/(?P<vid>\d{10,})")
+    @handle("douyin", r"douyin\.com/(?P<ty>video|note|article)/(?P<vid>\d+)")
+    @handle("m.douyin", r"m\.douyin\.com/share/(?P<ty>slides|video|note)/(?P<vid>\d+)")
     async def _parse_douyin(self, searched: re.Match[str]) -> list[MediaContent]:
         vid = searched.group("vid")
         group_dict = searched.groupdict()

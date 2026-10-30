@@ -28,6 +28,7 @@ from ...template_data import (
     TemplateImageGroup,
 )
 from ....utils.downloader import download_image
+from ....utils.exceptions import DownloadException
 
 CARD_WIDTH = 620
 CARD_OUTPUT_WIDTH = 1000
@@ -77,7 +78,7 @@ async def _local_avatar(author: Author | None) -> tuple[str, Path | None]:
     if path is None and author.avatar_url is not None:
         try:
             path = await download_image(author.avatar_url)
-        except (httpx.HTTPError, OSError, ValueError):
+        except (httpx.HTTPError, DownloadException, OSError, ValueError):
             return author.name, None
     return author.name, path
 
@@ -177,7 +178,7 @@ async def _blocks(card: PreviewCard) -> tuple[TemplateText | TemplateImageGroup,
         if path is None and block.url is not None:
             try:
                 path = await download_image(block.url)
-            except (httpx.HTTPError, OSError, ValueError):
+            except (httpx.HTTPError, DownloadException, OSError, ValueError):
                 continue
         if path is None:
             raise ValueError("图片块没有可用来源")
@@ -196,7 +197,7 @@ async def _hero_data(card: PreviewCard, *, dark: bool) -> str:
     if path is None and card.cover_url is not None:
         try:
             path = await download_image(card.cover_url)
-        except (httpx.HTTPError, OSError, ValueError):
+        except (httpx.HTTPError, DownloadException, OSError, ValueError):
             return ""
     if path is None:
         return ""
@@ -214,7 +215,7 @@ async def _ambient_data(card: PreviewCard) -> str:
     if path is None and card.cover_url is not None:
         try:
             path = await download_image(card.cover_url)
-        except (httpx.HTTPError, OSError, ValueError):
+        except (httpx.HTTPError, DownloadException, OSError, ValueError):
             return ""
     if path is None:
         return ""

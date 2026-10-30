@@ -28,6 +28,7 @@ from .helpers import (
     file_digest,
 )
 from ..utils.downloader import download_image
+from ..utils.exceptions import DownloadException
 
 CARD_WIDTH: Final = 620
 CARD_OUTPUT_WIDTH: Final = 1000
@@ -161,7 +162,7 @@ async def _download_asset_safely(url: str | None, current_path: Path | None) -> 
         return None
     try:
         return await download_image(url)
-    except (httpx.HTTPError, OSError, ValueError):
+    except (httpx.HTTPError, DownloadException, OSError, ValueError):
         return None
 
 
