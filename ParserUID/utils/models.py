@@ -107,6 +107,7 @@ class VideoContent(MediaContent):
         super().__init__(path, loader)
         self.cover = cover
         self.duration = duration
+        self.fallback_urls: list[str] = []
 
     def kind(self) -> Literal["video"]:
         return "video"

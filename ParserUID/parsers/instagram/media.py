@@ -19,6 +19,7 @@ class InstagramMedia:
     url: str
     cover: str | None = None
     duration: float = 0.0
+    title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,7 @@ class InstagramPost:
     title: str | None
     author: str | None
     author_id: str | None
+    author_avatar: str | None
     text: str | None
     timestamp: int | None
     cover: str | None
@@ -71,7 +73,7 @@ def unwrap_entries(info: dict[str, object]) -> list[dict[str, object]]:
     entries = info.get("entries")
     if not isinstance(entries, list):
         return []
-    return [{str(k): v for k, v in item.items()} for item in entries if isinstance(item, dict)]
+    return [{str(k): v for k, v in item.items() if v is not None} for item in entries if isinstance(item, dict)]
 
 
 def video_formats(info: dict[str, object]) -> list[dict[str, object]]:
@@ -79,9 +81,9 @@ def video_formats(info: dict[str, object]) -> list[dict[str, object]]:
     if not isinstance(formats, list):
         return []
     return [
-        {str(k): v for k, v in item.items()}
+        {str(k): v for k, v in item.items() if v is not None}
         for item in formats
-        if isinstance(item, dict) and _trusted_media_url(item.get("url")) and item.get("vcodec") not in (None, "none")
+        if isinstance(item, dict) and item.get("vcodec") not in (None, "none") and _trusted_media_url(item.get("url"))
     ]
 
 
@@ -106,6 +108,37 @@ def pick_thumbnail(info: dict[str, object]) -> str | None:
         return thumbnails[0]
     for key in ("thumbnail", "display_url"):
         value = info.get(key)
+        if _trusted_media_url(value):
+            return str(value)
+    return None
+
+
+def media_title(info: dict[str, object]) -> str | None:
+    """读取单条轮播稿件的标题，缺失时退回描述首行。"""
+    for key in ("title", "fulltitle"):
+        value = info.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    description = info.get("description")
+    if isinstance(description, str):
+        first_line = next(
+            (line.strip() for line in description.splitlines() if line.strip()),
+            "",
+        )
+        if first_line:
+            return first_line[:120]
+    return None
+
+
+def author_avatar(info: dict[str, object]) -> str | None:
+    """从 yt-dlp 的频道/作者缩略图中选取可信头像。"""
+    authors = info.get("channel_thumbnails") or info.get("uploader_thumbnails")
+    if not isinstance(authors, list):
+        return None
+    for item in reversed(authors):
+        if not isinstance(item, dict):
+            continue
+        value = item.get("url")
         if _trusted_media_url(value):
             return str(value)
     return None

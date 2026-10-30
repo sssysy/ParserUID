@@ -67,6 +67,17 @@ def audio_format_selector() -> str:
     return "bestaudio/best"
 
 
+def download_ranges(seconds: int | float | None) -> str | None:
+    """生成 yt-dlp 的起点裁切范围；非正数表示不裁切。"""
+    if seconds is None:
+        return None
+    try:
+        value = int(float(seconds))
+    except (TypeError, ValueError):
+        return None
+    return f"0-{value}" if value > 0 else None
+
+
 def media_is_audio(target: YouTubeTarget, mode: str | None) -> bool:
     selected = (mode or "auto").lower()
     if selected == "audio":

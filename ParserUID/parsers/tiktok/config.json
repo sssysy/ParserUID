@@ -12,14 +12,19 @@
     "cookie": {
       "type": "text",
       "label": "Cookie",
-      "hint": "选填，Cookie 字符串",
+      "hint": "选填；支持 Cookie 字符串或 Netscape cookies.txt，敏感字段不会回显",
       "secret": true,
       "default": ""
     },
     "video_quality": {
       "type": "select",
       "label": "视频画质偏好",
-      "options": ["auto", "1080p", "720p", "540p"],
+      "options": [
+        "auto",
+        "1080p",
+        "720p",
+        "540p"
+      ],
       "default": "auto"
     }
   }

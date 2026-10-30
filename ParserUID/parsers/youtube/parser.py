@@ -13,9 +13,11 @@ from ..base import BaseParser, handle
 from .media import (
     parse_target,
     media_is_audio,
+    download_ranges,
     audio_format_selector,
     video_format_selector,
 )
+from .cookie import YouTubeCookieFile
 from .models import VideoData, decode_video
 from ...utils.models import Platform, MediaContent
 from ...render.models import Author
@@ -31,6 +33,10 @@ class YouTubeParser(BaseParser):
         if cookie:
             headers["Cookie"] = cookie
         return headers
+
+    @property
+    def _cookie_source(self) -> str:
+        return self.get_config_value("cookie")
 
     @handle(
         "youtube.com/watch",
@@ -82,6 +88,7 @@ class YouTubeParser(BaseParser):
 
         media_mode = self.get_config_value("media_mode", "auto")
         is_audio = media_is_audio(target, media_mode)
+        clip = self._clip_seconds(video.duration)
 
         video_quality = self.get_config_value("video_quality", "720p")
         await self.send_info(
@@ -89,9 +96,9 @@ class YouTubeParser(BaseParser):
             card_type="video",
             author=author,
             cover_url=video.thumbnail,
-            duration=video.duration,
             text=video.description or "",
             url=target.url,
+            timestamp=video.timestamp,
             video_duration=f"{int(video.duration)}s" if video.duration > 0 else None,
             video_quality=None if is_audio else video_quality,
         )
@@ -105,11 +112,21 @@ class YouTubeParser(BaseParser):
         else:
             content = self.create_video_content(
                 None,
-                lambda: self._download_video(target.url),
+                lambda: self._download_video(target.url, clip),
                 duration=video.duration,
                 proxy=self.proxy,
             )
         return self.result([content])
+
+    def _clip_seconds(self, duration: float) -> int | None:
+        raw = self.get_config_value("clip_seconds", "0")
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        if value > 0 and duration > value:
+            return value
+        return None
 
     async def _extract(self, url: str) -> VideoData:
         import yt_dlp
@@ -121,6 +138,9 @@ class YouTubeParser(BaseParser):
         }
         if self.proxy:
             opts["proxy"] = self.proxy
+        cookie_file = await self._cookiefile()
+        if cookie_file is not None:
+            opts["cookiefile"] = str(cookie_file)
 
         def _sync_extract() -> VideoData:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -135,7 +155,7 @@ class YouTubeParser(BaseParser):
             logger.warning(f"[YouTube] 元数据获取失败 | error={exc}")
             raise ParseException(f"YouTube 视频信息获取失败：{exc}") from exc
 
-    async def _download_video(self, url: str) -> Path:
+    async def _download_video(self, url: str, clip: int | None) -> Path:
         quality = self.get_config_value("video_quality", "720p")
         codec = self.get_config_value("video_codec", "auto")
         selector = video_format_selector(quality, codec)
@@ -143,17 +163,17 @@ class YouTubeParser(BaseParser):
         custom_opts: dict[str, object] = {
             "format": selector,
             "http_headers": self._get_headers(),
-            "concurrent_fragments": 4,
+            "concurrent_fragment_downloads": 4,
         }
-        clip_str = self.get_config_value("clip_seconds", "0")
-        if clip_str.isdigit() and int(clip_str) > 0:
-            custom_opts["download_ranges"] = f"0-{clip_str}"
+        cookie_file = await self._cookiefile()
 
         try:
             return await self.downloader.download_with_ytdlp(
                 url,
                 proxy=self.proxy,
                 custom_opts=custom_opts,
+                cookiefile=cookie_file,
+                download_ranges=download_ranges(clip),
             )
         except Exception as exc:
             logger.warning(f"[YouTube] 视频下载失败 | error={exc}")
@@ -164,15 +184,23 @@ class YouTubeParser(BaseParser):
             "format": audio_format_selector(),
             "http_headers": self._get_headers(),
         }
+        cookie_file = await self._cookiefile()
         try:
             return await self.downloader.download_with_ytdlp(
                 url,
                 proxy=self.proxy,
                 custom_opts=custom_opts,
+                cookiefile=cookie_file,
+                audio_only=True,
             )
         except Exception as exc:
             logger.warning(f"[YouTube] 音频下载失败 | error={exc}")
             raise ParseException(f"YouTube 音频下载失败：{exc}") from exc
+
+    async def _cookiefile(self) -> Path | None:
+        if not self._cookie_source:
+            return None
+        return await YouTubeCookieFile(self._cookie_source).prepare()
 
     async def _enrich_author(self, author: Author, video: VideoData) -> Author:
         try:

@@ -310,6 +310,9 @@ class Downloader:
         *,
         proxy: str | None = None,
         custom_opts: dict[str, object] | None = None,
+        cookiefile: Path | None = None,
+        download_ranges: str | None = None,
+        audio_only: bool = False,
     ) -> Path:
         """使用 yt-dlp 后台线程提取并下载多媒体。"""
         try:
@@ -323,15 +326,19 @@ class Downloader:
         def _sync_ytdlp_run() -> Path:
             opts: dict[str, object] = {
                 "outtmpl": outtmpl,
-                "format": "bestvideo+bestaudio/best",
+                "format": "bestaudio/best" if audio_only else "bestvideo+bestaudio/best",
                 "noplaylist": True,
                 "quiet": True,
                 "no_warnings": True,
             }
             if proxy is not None:
                 opts["proxy"] = proxy
+            if cookiefile is not None and cookiefile.is_file():
+                opts["cookiefile"] = str(cookiefile)
             if custom_opts is not None:
                 opts.update(custom_opts)
+            if download_ranges:
+                opts["download_ranges"] = _ytdlp_download_range(download_ranges)
 
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -347,6 +354,44 @@ class Downloader:
                 return result_path
 
         return await asyncio.to_thread(_sync_ytdlp_run)
+
+    async def ytdlp_extract_raw(
+        self,
+        url: str,
+        *,
+        proxy: str | None = None,
+        cookiefile: Path | None = None,
+        headers: dict[str, str] | None = None,
+        ignore_no_formats_error: bool = False,
+    ) -> dict[str, object]:
+        """在后台线程读取 yt-dlp 原始元数据，不下载媒体。"""
+        try:
+            import yt_dlp
+        except ImportError as exc:
+            raise DownloadException("未安装 yt-dlp，无法获取媒体信息") from exc
+
+        opts: dict[str, object] = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+        }
+        if proxy is not None:
+            opts["proxy"] = proxy
+        if headers:
+            opts["http_headers"] = headers
+        if cookiefile is not None and cookiefile.is_file():
+            opts["cookiefile"] = str(cookiefile)
+        if ignore_no_formats_error:
+            opts["ignore_no_formats_error"] = True
+
+        def _sync_extract() -> dict[str, object]:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                raw = ydl.extract_info(url, download=False)
+                if not isinstance(raw, dict):
+                    raise DownloadException("yt-dlp 返回数据异常")
+                return {str(key): value for key, value in raw.items()}
+
+        return await asyncio.to_thread(_sync_extract)
 
     @staticmethod
     def _verify_image(path: Path) -> None:
@@ -373,6 +418,18 @@ class Downloader:
                 entry.unlink(missing_ok=True)
                 removed += 1
         return removed
+
+
+def _ytdlp_download_range(value: str) -> object:
+    """把受控的 ``start-end`` 裁切字符串转换为 yt-dlp 回调。"""
+    try:
+        import yt_dlp
+    except ImportError as exc:
+        raise DownloadException("未安装 yt-dlp，无法解析此类视频") from exc
+    try:
+        return yt_dlp.utils.download_range_func(None, value)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise DownloadException("yt-dlp 下载裁切范围无效") from exc
 
 
 _GLOBAL_DOWNLOADER = Downloader()

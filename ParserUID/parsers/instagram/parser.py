@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 import asyncio
+import tempfile
 from typing import ClassVar
+from pathlib import Path
 from collections.abc import Sequence
 
 from gsuid_core.logger import logger
@@ -15,15 +17,19 @@ from .media import (
     InstagramMedia,
     InstagramTarget,
     image_urls,
+    media_title,
     parse_target,
+    author_avatar,
     video_formats,
     pick_thumbnail,
     unwrap_entries,
     format_selector,
 )
 from ...sender import ContentItem
-from ...utils.models import Platform
-from ...utils.exceptions import ParseException
+from ...utils.models import Platform, VideoContent
+from ...utils.exceptions import ParseException, DownloadException
+
+COOKIE_DOMAIN = ".instagram.com"
 
 
 class InstagramParser(BaseParser):
@@ -92,32 +98,22 @@ class InstagramParser(BaseParser):
         return resolved
 
     async def _extract(self, target: InstagramTarget) -> dict[str, object]:
-        try:
-            import yt_dlp
-        except ImportError as exc:
-            raise ParseException("需要安装 yt-dlp 才能解析 Instagram 内容") from exc
-
-        opts: dict[str, object] = {
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": False,
-        }
-        if self.proxy:
-            opts["proxy"] = self.proxy
         cookie = self.get_config_value("cookie")
-        if cookie:
-            opts["http_headers"] = {"Cookie": cookie}
-
-        def _sync_extract() -> dict[str, object]:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                raw = ydl.extract_info(target.url, download=False)
-                return {str(k): v for k, v in raw.items()} if isinstance(raw, dict) else {}
-
+        cookie_file = self._cookie_file(cookie)
         try:
-            return await asyncio.to_thread(_sync_extract)
-        except Exception as exc:
+            return await self.downloader.ytdlp_extract_raw(
+                target.url,
+                cookiefile=cookie_file,
+                headers=self.ig_headers,
+                proxy=self.proxy,
+                ignore_no_formats_error=True,
+            )
+        except (DownloadException, OSError, ValueError) as exc:
             logger.warning(f"[instagram] 元数据获取失败 | error={exc} | shortcode={target.shortcode}")
             raise ParseException("Instagram 作品信息获取失败") from exc
+        finally:
+            if cookie_file is not None:
+                await asyncio.to_thread(cookie_file.unlink, missing_ok=True)
 
     @staticmethod
     def _build_post(target: InstagramTarget, info: dict[str, object]) -> InstagramPost:
@@ -139,6 +135,7 @@ class InstagramParser(BaseParser):
                         url=str(selected["url"]),
                         cover=pick_thumbnail(entry),
                         duration=_float_or_zero(entry.get("duration")),
+                        title=media_title(entry),
                     )
                 )
                 continue
@@ -164,6 +161,7 @@ class InstagramParser(BaseParser):
             title=title,
             author=author,
             author_id=author_id,
+            author_avatar=author_avatar(info),
             text=_text(info.get("description")),
             timestamp=int(str(timestamp)) if timestamp else None,
             cover=cover,
@@ -173,7 +171,11 @@ class InstagramParser(BaseParser):
     async def _send_description(self, post: InstagramPost) -> None:
         author = None
         if post.author:
-            author = self.create_author(post.author, uid=post.author_id)
+            author = self.create_author(
+                post.author,
+                avatar_url=post.author_avatar,
+                uid=post.author_id,
+            )
         if post.has_video:
             video = next(item for item in post.medias if item.kind == "video")
             await self.send_info(
@@ -184,6 +186,7 @@ class InstagramParser(BaseParser):
                 video_duration=f"{int(video.duration)}秒" if video.duration > 0 else None,
                 text=post.text or "",
                 url=post.target.url,
+                timestamp=post.timestamp,
             )
             return
         await self.send_info(
@@ -193,28 +196,16 @@ class InstagramParser(BaseParser):
             cover_url=post.cover,
             text=post.text or "",
             url=post.target.url,
+            timestamp=post.timestamp,
         )
 
     def _build_contents(self, post: InstagramPost) -> list[ContentItem]:
         contents: list[ContentItem] = []
-        video_index = 0
         for media in post.medias:
             if media.kind == "video":
-                video_index += 1
-                current_index = video_index
 
-                async def _load_video(idx: int = current_index):
-                    target_url = post.target.url
-                    if idx > 1:
-                        target_url = f"{target_url}?img_index={idx}"
-                    fmt = format_selector(self.get_config_value("video_quality", "auto"))
-                    return await self.downloader.download_with_ytdlp(
-                        target_url,
-                        proxy=self.proxy,
-                        custom_opts={"format": fmt},
-                    )
-
-                from ...utils.models import VideoContent
+                async def _load_video(media_url: str = media.url) -> Path:
+                    return await self._download_media(media_url)
 
                 contents.append(
                     VideoContent(
@@ -226,6 +217,60 @@ class InstagramParser(BaseParser):
                 continue
             contents.extend(self.create_image_contents([media.url], headers=self.ig_headers, proxy=self.proxy))
         return contents
+
+    async def _download_media(self, url: str) -> Path:
+        """直接下载轮播条目的真实媒体地址，避免重解同一作品。"""
+        headers = self.ig_headers
+        try:
+            return await self.downloader.download_video(
+                url,
+                headers=headers,
+                proxy=self.proxy,
+            )
+        except DownloadException:
+            pass
+
+        custom_opts: dict[str, object] = {
+            "format": format_selector(self.get_config_value("video_quality", "auto")),
+        }
+        cookie_file = self._cookie_file(self.get_config_value("cookie"))
+        try:
+            return await self.downloader.download_with_ytdlp(
+                url,
+                proxy=self.proxy,
+                cookiefile=cookie_file,
+                custom_opts=custom_opts,
+            )
+        except DownloadException as exc:
+            logger.warning(f"[instagram] 视频下载失败 | error={exc}")
+            raise ParseException("Instagram 视频下载失败") from exc
+        finally:
+            if cookie_file is not None:
+                await asyncio.to_thread(cookie_file.unlink, missing_ok=True)
+
+    @staticmethod
+    def _cookie_file(cookie: str) -> Path | None:
+        """将配置 Cookie 写入受限的临时 Netscape 文件供 yt-dlp 读取。"""
+        if not cookie.strip():
+            return None
+        file = tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".cookies.txt",
+            prefix="instagram_",
+            delete=False,
+        )
+        path = Path(file.name)
+        try:
+            file.write("# Netscape HTTP Cookie File\n")
+            for raw_pair in cookie.split(";"):
+                name, separator, value = raw_pair.strip().partition("=")
+                if not separator or not name or not value:
+                    continue
+                file.write(f"{COOKIE_DOMAIN}\tTRUE\t/\tTRUE\t0\t{name}\t{value}\n")
+        finally:
+            file.close()
+        return path
 
 
 def _text(value: object) -> str | None:
