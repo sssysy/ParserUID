@@ -131,16 +131,25 @@ class ZhihuParser(BaseParser):
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
-        cookie = self.get_config_value("cookie")
-        self.client = ZhihuClient(
-            cookie_str=cookie,
-            headers=_ZHIHU_HEADERS,
-            timeout=30,
-            retries=2,
-        )
+        self._client_instance: ZhihuClient | None = None
+
+    @property
+    def client(self) -> ZhihuClient:
+        proxy = self.proxy
+        if self._client_instance is None or self._client_instance.proxy != proxy:
+            self._client_instance = ZhihuClient(
+                cookie_str=self.get_config_value("cookie"),
+                headers=_ZHIHU_HEADERS,
+                proxy=proxy,
+                timeout=30,
+                retries=2,
+            )
+        return self._client_instance
 
     async def close(self) -> None:
-        await self.client.close()
+        if self._client_instance is not None:
+            await self._client_instance.close()
+            self._client_instance = None
         await super().close()
 
     @property
@@ -552,7 +561,9 @@ class ZhihuParser(BaseParser):
         prefix: list[dict[str, object]] = [{"kind": "text", "value": header_text}] if header_text else []
         contents = blocks_to_contents(
             [*prefix, *blocks],
-            image_loader=lambda u: self.create_image_contents([u], headers=self.media_headers)[0] if u else None,
+            image_loader=lambda u: (
+                self.create_image_contents([u], headers=self.media_headers, proxy=self.proxy)[0] if u else None
+            ),
         )
         videos = self._video_contents(blocks)
         contents.extend(videos)
@@ -576,6 +587,7 @@ class ZhihuParser(BaseParser):
                     url,
                     duration=float(str(block.get("duration") or 0)),
                     headers=self.media_headers,
+                    proxy=self.proxy,
                 )
             )
         return result

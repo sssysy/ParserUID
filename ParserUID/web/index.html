@@ -34,6 +34,17 @@
           >
             <span>皮肤包</span>
           </button>
+          <button
+            class="primary-tab"
+            id="tab-network"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel-network"
+            data-tab="network"
+          >
+            <span>网络</span>
+          </button>
         </div>
 
         <div class="bar-actions">
@@ -151,6 +162,45 @@
               </p>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section
+        class="tab-panel"
+        id="panel-network"
+        role="tabpanel"
+        aria-labelledby="tab-network"
+        hidden
+      >
+        <div class="skin-panel network-panel">
+          <header class="content-header">
+            <h1>网络</h1>
+            <p>全局代理只对已启用“使用代理”的解析器生效。</p>
+          </header>
+
+          <section class="skin-section network-section">
+            <h2 class="section-title">代理地址</h2>
+            <div class="network-form">
+              <div class="filled-field">
+                <label for="proxy-url">HTTP(S) 代理</label>
+                <input
+                  id="proxy-url"
+                  type="text"
+                  inputmode="url"
+                  autocomplete="off"
+                  placeholder="http://127.0.0.1:7890"
+                />
+              </div>
+              <p class="field-support" id="proxy-message">
+                留空表示直连。保存后新任务立即使用新代理。
+              </p>
+              <div class="network-actions">
+                <button class="filled-button" id="save-proxy" type="button">
+                  保存代理
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
     </main>

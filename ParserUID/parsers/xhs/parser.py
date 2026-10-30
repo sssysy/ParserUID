@@ -355,6 +355,7 @@ class XhsParser(BaseParser):
                 selected.url,
                 duration=note.video.duration,
                 headers=self.media_headers,
+                proxy=self.proxy,
                 fallback_urls=selected.fallback_urls,
             )
             return self.result([content])
@@ -411,9 +412,10 @@ class XhsParser(BaseParser):
                             stream.url,
                             image_url,
                             headers=self.media_headers,
+                            proxy=self.proxy,
                             fallback_urls=stream.fallback_urls,
                         )
                     )
                     continue
-            contents.extend(self.create_image_contents([image_url], headers=self.media_headers))
+            contents.extend(self.create_image_contents([image_url], headers=self.media_headers, proxy=self.proxy))
         return contents

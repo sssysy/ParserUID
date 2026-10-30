@@ -11,7 +11,8 @@ from collections.abc import Callable, Sequence, Awaitable, Coroutine
 import httpx
 
 from .config import ParserItemConfig
-from ..sender import ContentItem
+from ..config import proxy_url
+from ..sender import ContentItem, send_proxy_context
 from ..utils.ffmpeg import merge_to_live_mp4
 from ..utils.models import (
     Platform,
@@ -21,6 +22,7 @@ from ..utils.models import (
     AudioContent,
     ImageContent,
     VideoContent,
+    DynamicContent,
     LivePhotoContent,
 )
 from ..render.models import (
@@ -37,9 +39,9 @@ DescriptionSink = Callable[[PreviewCard], Awaitable[None]]
 HandlerFunc = Callable[[re.Match[str]], Coroutine[object, object, Sequence[ContentItem]]]
 AvatarLoader = Callable[[str], Awaitable[Path]]
 
-_CURRENT_DESC_SINK: ContextVar[DescriptionSink | None] = ContextVar(
+_CURRENT_DESC_SINK: ContextVar[tuple[DescriptionSink | None, str | None]] = ContextVar(
     "parser_uid_desc_sink",
-    default=None,
+    default=(None, None),
 )
 _HANDLER_SPECS_ATTR = "_parser_handler_specs"
 
@@ -80,7 +82,10 @@ class BaseParser:
         self.downloader = Downloader()
         self.headers: dict[str, str] = {}
         self._client: httpx.AsyncClient | None = None
+        self._client_proxy: str | None = None
         self._curl_client: object | None = None
+        self._curl_client_proxy: str | None = None
+        self._curl_client_impersonate: str | None = None
         self._handlers: dict[str, tuple[re.Pattern[str], HandlerFunc]] = {}
         self._collect_handlers()
 
@@ -88,6 +93,14 @@ class BaseParser:
         """安全读取解析器专属用户配置项字符串。"""
         raw = self.config.values.get(key)
         return str(raw) if raw is not None else default
+
+    @property
+    def proxy(self) -> str | None:
+        """按解析器开关返回全局代理地址，关闭或未配置时直连。"""
+        enabled = self.config.values.get("use_proxy")
+        if enabled is not True:
+            return None
+        return proxy_url()
 
     def _collect_handlers(self) -> None:
         for attr_name in dir(self):
@@ -125,22 +138,37 @@ class BaseParser:
 
     async def get_client(self, proxy: str | None = None) -> httpx.AsyncClient:
         """获取或创建该解析器持有的标准异步 HTTP 会话。"""
+        effective_proxy = self.proxy if proxy is None else proxy
+        if self._client is not None and not self._client.is_closed and self._client_proxy != effective_proxy:
+            await self._client.aclose()
+            self._client = None
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(30.0, connect=10.0),
                 follow_redirects=True,
-                proxy=proxy,
+                proxy=effective_proxy,
             )
+            self._client_proxy = effective_proxy
         return self._client
 
     async def get_curl_client(self, impersonate: str = "chrome") -> object:
         """获取支持 TLS 指纹伪装的 curl_cffi 异步会话。"""
+        effective_proxy = self.proxy
+        if self._curl_client is not None and (
+            self._curl_client_proxy != effective_proxy or self._curl_client_impersonate != impersonate
+        ):
+            await self._close_curl_client()
         if self._curl_client is None:
             try:
                 from curl_cffi.requests import AsyncSession
             except ImportError as exc:
                 raise RuntimeError(f"平台 {self.platform.name} 需要 TLS 指纹伪装，请先安装 curl_cffi") from exc
-            self._curl_client = AsyncSession(impersonate=impersonate)
+            self._curl_client = AsyncSession(
+                impersonate=impersonate,
+                proxy=effective_proxy,
+            )
+            self._curl_client_proxy = effective_proxy
+            self._curl_client_impersonate = impersonate
         return self._curl_client
 
     async def get_redirect_url(
@@ -188,7 +216,7 @@ class BaseParser:
 
     async def download_image(self, url: str) -> Path:
         """复用插件统一缓存下载图片。"""
-        return await download_image(url)
+        return await download_image(url, proxy=self.proxy)
 
     async def send_info(
         self,
@@ -210,7 +238,7 @@ class BaseParser:
         video_quality: str | None = None,
     ) -> None:
         """统一入口：构造预览卡片并通过调度上下文的 sink 发送。"""
-        sink = _CURRENT_DESC_SINK.get()
+        sink, proxy = _CURRENT_DESC_SINK.get()
         if sink is None:
             return
         card = PreviewCard(
@@ -232,7 +260,14 @@ class BaseParser:
             video_quality=video_quality,
             card_type=card_type,
         )
-        await sink(card)
+        token = _CURRENT_DESC_SINK.set((sink, proxy))
+        send_variable = send_proxy_context()
+        send_token = send_variable.set(proxy)
+        try:
+            await sink(card)
+        finally:
+            send_variable.reset(send_token)
+            _CURRENT_DESC_SINK.reset(token)
 
     def result(self, contents: Sequence[ContentItem]) -> list[ContentItem]:
         """按顺序返回最终内容队列。"""
@@ -272,9 +307,21 @@ class BaseParser:
         *,
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
-    ) -> list[ImageContent]:
+    ) -> list[DynamicContent]:
         """批量构建动图/动态内容列表。"""
-        return self.create_image_contents(urls, headers=headers, proxy=proxy)
+        results: list[DynamicContent] = []
+        for target_url in urls:
+            current_url = target_url
+
+            async def _load_dynamic(url: str = current_url) -> Path:
+                return await self.downloader.download_file(
+                    url,
+                    headers=headers,
+                    proxy=proxy,
+                )
+
+            results.append(DynamicContent(None, _load_dynamic))
+        return results
 
     def create_video_content(
         self,
@@ -399,7 +446,7 @@ class BaseParser:
         if keyword not in self._handlers:
             raise ParseException(f"未注册的关键词：{keyword}")
         _, handler = self._handlers[keyword]
-        token = _CURRENT_DESC_SINK.set(desc_sink)
+        token = _CURRENT_DESC_SINK.set((desc_sink, self.proxy))
         try:
             return await handler(searched)
         finally:
@@ -410,14 +457,20 @@ class BaseParser:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
+        self._client_proxy = None
+        await self._close_curl_client()
+        await self.downloader.close()
+
+    async def _close_curl_client(self) -> None:
         if self._curl_client is not None and hasattr(self._curl_client, "close"):
             close_method = getattr(self._curl_client, "close")
             if callable(close_method):
                 close_result = close_method()
                 if hasattr(close_result, "__await__"):
                     await close_result
-            self._curl_client = None
-        await self.downloader.close()
+        self._curl_client = None
+        self._curl_client_proxy = None
+        self._curl_client_impersonate = None
 
     async def close_session(self) -> None:
         """兼容旧解析器的会话关闭入口。"""

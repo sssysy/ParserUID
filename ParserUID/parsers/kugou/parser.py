@@ -6,6 +6,7 @@ import re
 import json
 import base64
 from typing import ClassVar
+from pathlib import Path
 from collections.abc import Sequence
 
 import httpx
@@ -118,7 +119,15 @@ class KugouParser(BaseParser):
             logger.warning(f"[酷狗] 歌词获取失败 | hash={actual_hash} | error={exc}")
 
         cover_url = play_info.album_img.replace("{size}", "480") if play_info.album_img else None
-        audio = self.create_audio_content(audio_url, duration=duration)
+
+        async def load_audio() -> Path:
+            return await self.downloader.download_audio(
+                audio_url,
+                headers={"Referer": "https://m.kugou.com/"},
+                proxy=self.proxy,
+            )
+
+        audio = self.create_audio_content(loader=load_audio, duration=duration)
         author = self.create_author(artist)
 
         bitrate = play_info.bitRate

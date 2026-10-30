@@ -118,6 +118,7 @@ class MagnetParser(BaseParser):
                 image_path = await self.downloader.download_image(
                     url,
                     headers=headers,
+                    proxy=self.proxy,
                 )
                 if not should_blur:
                     return image_path

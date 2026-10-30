@@ -132,6 +132,8 @@ async def _prepare_context(
     card: PreviewCard,
     pack_dir: Path,
     skin_name: str,
+    *,
+    proxy: str | None,
 ) -> Mapping[str, object]:
     """Load optional context.py data preparation; HTML stays in Jinja templates."""
     context_file = pack_dir / "context.py"
@@ -148,31 +150,40 @@ async def _prepare_context(
     function = module.__dict__["prepare_context"]
     if not callable(function):
         raise ValueError(f"prepare_context 不可调用：{pack_dir.name}")
-    prepare: Callable[[PreviewCard], Awaitable[Mapping[str, object]] | Mapping[str, object]] = function
+    accepts_proxy = "proxy" in inspect.signature(function).parameters
+    prepare: Callable[..., Awaitable[Mapping[str, object]] | Mapping[str, object]] = function
     if inspect.iscoroutinefunction(prepare):
-        return await prepare(card)
-    result = await asyncio.to_thread(prepare, card)
+        return await prepare(card, proxy=proxy) if accepts_proxy else await prepare(card)
+    blocking = asyncio.to_thread(prepare, card, proxy=proxy) if accepts_proxy else asyncio.to_thread(prepare, card)
+    result = await blocking
     return await result if inspect.isawaitable(result) else result
 
 
-async def _download_asset_safely(url: str | None, current_path: Path | None) -> Path | None:
+async def _download_asset_safely(
+    url: str | None,
+    current_path: Path | None,
+    *,
+    proxy: str | None,
+) -> Path | None:
     if current_path is not None and current_path.is_file():
         return current_path
     if url is None:
         return None
     try:
-        return await download_image(url)
+        if proxy is None:
+            return await download_image(url)
+        return await download_image(url, proxy=proxy)
     except (httpx.HTTPError, DownloadException, OSError, ValueError):
         return None
 
 
-async def ensure_card_assets(card: PreviewCard) -> PreviewCard:
+async def ensure_card_assets(card: PreviewCard, *, proxy: str | None = None) -> PreviewCard:
     """预取远程媒体资源，让皮肤模板直接使用本地路径。"""
-    cover_path = await _download_asset_safely(card.cover_url, card.cover_path)
+    cover_path = await _download_asset_safely(card.cover_url, card.cover_path, proxy=proxy)
 
     author = card.author
     if author is not None:
-        avatar_path = await _download_asset_safely(author.avatar_url, author.avatar_path)
+        avatar_path = await _download_asset_safely(author.avatar_url, author.avatar_path, proxy=proxy)
         author = Author(
             name=author.name,
             description=author.description,
@@ -187,15 +198,15 @@ async def ensure_card_assets(card: PreviewCard) -> PreviewCard:
         if isinstance(block, TextBlock):
             blocks.append(block)
         elif isinstance(block, ImageBlock):
-            block_path = await _download_asset_safely(block.url, block.path)
+            block_path = await _download_asset_safely(block.url, block.path, proxy=proxy)
             blocks.append(ImageBlock(path=block_path, url=block.url, caption=block.caption) if block_path else block)
 
     comments: list[Comment] = []
     for comment in card.comments:
-        c_avatar = await _download_asset_safely(comment.avatar_url, comment.avatar_path)
+        c_avatar = await _download_asset_safely(comment.avatar_url, comment.avatar_path, proxy=proxy)
         replies: list[CommentReply] = []
         for reply in comment.replies:
-            r_avatar = await _download_asset_safely(reply.avatar_url, reply.avatar_path)
+            r_avatar = await _download_asset_safely(reply.avatar_url, reply.avatar_path, proxy=proxy)
             replies.append(
                 CommentReply(
                     author_name=reply.author_name,
@@ -219,7 +230,7 @@ async def ensure_card_assets(card: PreviewCard) -> PreviewCard:
             )
         )
 
-    repost = await ensure_card_assets(card.repost) if card.repost is not None else None
+    repost = await ensure_card_assets(card.repost, proxy=proxy) if card.repost is not None else None
 
     return PreviewCard(
         platform_name=card.platform_name,
@@ -290,8 +301,17 @@ def _render_prepared_html(html: str, *, video: bool) -> bytes:
     )
 
 
-async def render_preview(card: PreviewCard, *, skin: str = "default") -> Path:
+async def render_preview(
+    card: PreviewCard,
+    *,
+    skin: str = "default",
+    proxy: str | None = None,
+) -> Path:
     """准备资源，用指定皮肤渲染卡片，并返回缓存的 PNG 路径。"""
+    return await _render_preview(card, skin=skin, proxy=proxy)
+
+
+async def _render_preview(card: PreviewCard, *, skin: str, proxy: str | None) -> Path:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     dark = card.is_video
     digest = _digest_card(card, skin)
@@ -299,9 +319,9 @@ async def render_preview(card: PreviewCard, *, skin: str = "default") -> Path:
     if path.is_file():
         return path
 
-    ready_card = await ensure_card_assets(card)
+    ready_card = await ensure_card_assets(card, proxy=proxy)
     pack_dir, manifest, environment = load_skin_pack(skin)
-    context = await _prepare_context(ready_card, pack_dir, skin)
+    context = await _prepare_context(ready_card, pack_dir, skin, proxy=proxy)
     html = await asyncio.to_thread(
         _render_skin_html,
         ready_card,

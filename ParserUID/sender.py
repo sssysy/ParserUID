@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Literal, Protocol, TypeAlias, runtime_checkable
 from pathlib import Path
+from contextvars import ContextVar
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 from collections.abc import Sequence
@@ -19,6 +20,14 @@ from .config import (
     is_node_enabled_for,
 )
 from .render.models import PreviewCard
+
+_CURRENT_SEND_PROXY: ContextVar[str | None] = ContextVar("parser_uid_send_proxy", default=None)
+
+
+def send_proxy_context() -> ContextVar[str | None]:
+    """返回当前发送链路的代理上下文，供解析器调度临时设置。"""
+    return _CURRENT_SEND_PROXY
+
 
 MediaKind: TypeAlias = Literal["image", "video", "audio", "file"]
 ContentKind: TypeAlias = Literal["text", "image", "video", "audio", "file"]
@@ -83,6 +92,7 @@ async def send_description(
     image_path = await render_preview(
         description,
         skin=default_skin_pack(),
+        proxy=_CURRENT_SEND_PROXY.get(),
     )
     if image_path is None:
         logger.warning("[Parser·发送] 描述卡片渲染失败")

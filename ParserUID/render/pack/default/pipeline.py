@@ -71,20 +71,24 @@ def _metric_template(metric: Metric, *, dark: bool) -> TemplateMetric:
     )
 
 
-async def _local_avatar(author: Author | None) -> tuple[str, Path | None]:
+async def _local_avatar(author: Author | None, *, proxy: str | None) -> tuple[str, Path | None]:
     if author is None:
         return "", None
     path = author.avatar_path
     if path is None and author.avatar_url is not None:
         try:
-            path = await download_image(author.avatar_url)
+            path = (
+                await download_image(author.avatar_url, proxy=proxy)
+                if proxy
+                else await download_image(author.avatar_url)
+            )
         except (httpx.HTTPError, DownloadException, OSError, ValueError):
             return author.name, None
     return author.name, path
 
 
-async def _avatar_data(author: Author | None, size: int) -> tuple[str, str]:
-    name, path = await _local_avatar(author)
+async def _avatar_data(author: Author | None, size: int, *, proxy: str | None) -> tuple[str, str]:
+    name, path = await _local_avatar(author, proxy=proxy)
     if path is None:
         return name, ""
     avatar = read_rgba(path)
@@ -105,7 +109,7 @@ def _logo_uri(platform_name: str) -> str:
     return _file_uri(path, (64, 64))
 
 
-async def _comment_template(comment: Comment) -> TemplateComment:
+async def _comment_template(comment: Comment, *, proxy: str | None) -> TemplateComment:
     avatar_name, avatar_uri = await _avatar_data(
         Author(
             name=comment.author_name,
@@ -113,6 +117,7 @@ async def _comment_template(comment: Comment) -> TemplateComment:
             avatar_url=comment.avatar_url,
         ),
         120,
+        proxy=proxy,
     )
     del avatar_name
     replies = []
@@ -124,6 +129,7 @@ async def _comment_template(comment: Comment) -> TemplateComment:
                 avatar_url=reply.avatar_url,
             ),
             90,
+            proxy=proxy,
         )
         replies.append(
             TemplateReply(
@@ -147,8 +153,12 @@ async def _comment_template(comment: Comment) -> TemplateComment:
     )
 
 
-async def _comment_templates(comments: tuple[Comment, ...]) -> tuple[TemplateComment, ...]:
-    return tuple([await _comment_template(comment) for comment in comments])
+async def _comment_templates(
+    comments: tuple[Comment, ...],
+    *,
+    proxy: str | None,
+) -> tuple[TemplateComment, ...]:
+    return tuple([await _comment_template(comment, proxy=proxy) for comment in comments])
 
 
 def _image_group(images: list[TemplateImage]) -> TemplateImageGroup:
@@ -160,7 +170,11 @@ def _image_group(images: list[TemplateImage]) -> TemplateImageGroup:
     )
 
 
-async def _blocks(card: PreviewCard) -> tuple[TemplateText | TemplateImageGroup, ...]:
+async def _blocks(
+    card: PreviewCard,
+    *,
+    proxy: str | None,
+) -> tuple[TemplateText | TemplateImageGroup, ...]:
     result: list[TemplateText | TemplateImageGroup] = []
     pending: list[TemplateImage] = []
 
@@ -177,7 +191,7 @@ async def _blocks(card: PreviewCard) -> tuple[TemplateText | TemplateImageGroup,
         path = block.path
         if path is None and block.url is not None:
             try:
-                path = await download_image(block.url)
+                path = await download_image(block.url, proxy=proxy) if proxy else await download_image(block.url)
             except (httpx.HTTPError, DownloadException, OSError, ValueError):
                 continue
         if path is None:
@@ -192,11 +206,11 @@ async def _blocks(card: PreviewCard) -> tuple[TemplateText | TemplateImageGroup,
     return tuple(result)
 
 
-async def _hero_data(card: PreviewCard, *, dark: bool) -> str:
+async def _hero_data(card: PreviewCard, *, dark: bool, proxy: str | None) -> str:
     path = card.cover_path
     if path is None and card.cover_url is not None:
         try:
-            path = await download_image(card.cover_url)
+            path = await download_image(card.cover_url, proxy=proxy) if proxy else await download_image(card.cover_url)
         except (httpx.HTTPError, DownloadException, OSError, ValueError):
             return ""
     if path is None:
@@ -210,11 +224,11 @@ async def _hero_data(card: PreviewCard, *, dark: bool) -> str:
     return data_uri(cover)
 
 
-async def _ambient_data(card: PreviewCard) -> str:
+async def _ambient_data(card: PreviewCard, *, proxy: str | None) -> str:
     path = card.cover_path
     if path is None and card.cover_url is not None:
         try:
-            path = await download_image(card.cover_url)
+            path = await download_image(card.cover_url, proxy=proxy) if proxy else await download_image(card.cover_url)
         except (httpx.HTTPError, DownloadException, OSError, ValueError):
             return ""
     if path is None:
@@ -229,9 +243,18 @@ async def _ambient_data(card: PreviewCard) -> str:
     return data_uri(background)
 
 
-async def prepare_template_card(card: PreviewCard, *, dark: bool) -> TemplateCard:
+async def prepare_template_card(
+    card: PreviewCard,
+    *,
+    dark: bool,
+    proxy: str | None = None,
+) -> TemplateCard:
     """将平台预览卡片转换为默认皮肤的 Jinja 上下文。"""
-    author_name, avatar_uri = await _avatar_data(card.author, 150 if dark else 160)
+    author_name, avatar_uri = await _avatar_data(
+        card.author,
+        150 if dark else 160,
+        proxy=proxy,
+    )
     if card.author is None:
         author_name = card.platform_display_name
     author_description = card.author.description if card.author is not None else None
@@ -240,9 +263,9 @@ async def prepare_template_card(card: PreviewCard, *, dark: bool) -> TemplateCar
     author_metrics = (
         tuple(_metric_template(metric, dark=dark) for metric in card.author.metrics) if card.author is not None else ()
     )
-    repost = await prepare_template_card(card.repost, dark=dark) if card.repost is not None else None
-    blocks = await _blocks(card)
-    hero_uri = await _hero_data(card, dark=dark)
+    repost = await prepare_template_card(card.repost, dark=dark, proxy=proxy) if card.repost is not None else None
+    blocks = await _blocks(card, proxy=proxy)
+    hero_uri = await _hero_data(card, dark=dark, proxy=proxy)
     common_meta = tuple(item for item in (card.timestamp, author_description) if item)
     profile_note = " · ".join(
         item for item in (author_description or "", f"用户 ID：{author_uid}" if author_uid else "") if item
@@ -260,11 +283,11 @@ async def prepare_template_card(card: PreviewCard, *, dark: bool) -> TemplateCar
         timestamp=card.timestamp,
         source_url=card.source_url,
         hero_uri=hero_uri,
-        ambient_uri=await _ambient_data(card) if dark else "",
+        ambient_uri=await _ambient_data(card, proxy=proxy) if dark else "",
         show_hero=bool(hero_uri) and not blocks and not card.text,
         blocks=blocks,
         metrics=metrics,
-        comments=await _comment_templates(card.comments),
+        comments=await _comment_templates(card.comments, proxy=proxy),
         extra_info=card.extra_info,
         repost=repost,
         common_meta=common_meta,

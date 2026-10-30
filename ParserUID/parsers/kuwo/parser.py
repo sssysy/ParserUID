@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import ClassVar
+from pathlib import Path
 from collections.abc import Sequence
 
 import httpx
@@ -71,7 +72,13 @@ class KuwoParser(BaseParser):
         lyric = data.lyric.strip()
         quality = data.quality.name if isinstance(data.quality, KuwoQuality) else str(data.quality)
 
-        audio = self.create_audio_content(audio_url, duration=duration)
+        async def load_audio() -> Path:
+            return await self.downloader.download_audio(
+                audio_url,
+                proxy=self.proxy,
+            )
+
+        audio = self.create_audio_content(loader=load_audio, duration=duration)
         author = self.create_author(artist, avatar_url)
         extra_info = _track_info(duration, album, quality)
 
@@ -159,6 +166,7 @@ class KuwoParser(BaseParser):
                 video_url,
                 duration=mv_duration,
                 headers=BODIAN_HEADERS,
+                proxy=self.proxy,
             )
             return self.result([video])
 
@@ -185,7 +193,14 @@ class KuwoParser(BaseParser):
         if not audio_url.startswith(("http://", "https://")):
             raise ParseException("波点音乐未返回有效音频地址")
 
-        audio = self.create_audio_content(audio_url, duration=duration, headers=BODIAN_HEADERS)
+        async def load_audio() -> Path:
+            return await self.downloader.download_audio(
+                audio_url,
+                headers=BODIAN_HEADERS,
+                proxy=self.proxy,
+            )
+
+        audio = self.create_audio_content(loader=load_audio, duration=duration)
         await self.send_info(
             title=title,
             card_type="common",

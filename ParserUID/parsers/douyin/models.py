@@ -9,7 +9,7 @@ import msgspec
 from msgspec import Struct, field
 
 from ...utils.utils import format_num
-from ...render.models import Metric
+from ...render.models import Metric, Comment, CommentReply
 
 
 class UrlList(Struct):
@@ -106,17 +106,23 @@ class Music(Struct):
     author: str = ""
     play_url: MusicPlayUrl = field(default_factory=MusicPlayUrl)
     extra: str | None = None
+    cover_hd: UrlList | None = None
+    cover_large: UrlList | None = None
+    cover_medium: UrlList | None = None
+    cover_thumb: UrlList | None = None
 
 
 class ArticleInfo(Struct):
-    article_title: str | None = None
-    article_content: str | None = None
+    article_title: str = ""
+    article_content: str = ""
+    fe_data: str = ""
 
 
 class ShareInfo(Struct):
     share_url: str = ""
     share_desc: str = ""
     share_title: str = ""
+    share_desc_info: str = ""
 
 
 class Aweme(Struct):
@@ -145,6 +151,39 @@ class Aweme(Struct):
         return self.aweme_type == 163 or self.article_info is not None
 
     @property
+    def work_type(self) -> str:
+        if self.is_article:
+            return "article"
+        if self.is_video:
+            return "video"
+        if self.is_slides:
+            return "collection"
+        return "gallery" if self.images else "video"
+
+    @property
+    def display_text(self) -> str:
+        if self.article_info and self.article_info.article_title:
+            return self.article_info.article_title
+        return self.desc or self.preview_title
+
+    @property
+    def text(self) -> str | None:
+        return self.desc.strip() or None
+
+    @property
+    def body_text(self) -> str | None:
+        if self.article_info and self.article_info.article_content:
+            try:
+                article = json.loads(self.article_info.article_content)
+            except (TypeError, ValueError):
+                article = None
+            if isinstance(article, dict):
+                markdown = article.get("markdown")
+                if isinstance(markdown, str) and markdown.strip():
+                    return markdown.strip()
+        return self.desc.strip() or self.share_info.share_desc_info.strip() or None
+
+    @property
     def short_url(self) -> str:
         if self.aweme_id:
             kind = "article" if self.is_article else ("video" if self.is_video else "note")
@@ -163,19 +202,37 @@ class Aweme(Struct):
         return self.author.unique_id or self.author.short_id or self.author.uid or None
 
     @property
-    def metrics(self) -> tuple[Metric, ...]:
-        def _parse_num(val: int | str | None) -> int:
-            try:
-                return int(val or 0)
-            except (ValueError, TypeError):
-                return 0
+    def music_url(self) -> str | None:
+        music = self.music
+        if music is None:
+            return None
+        if music.play_url.uri:
+            return music.play_url.uri
+        if not music.extra:
+            return None
+        try:
+            extra = json.loads(music.extra)
+        except (TypeError, ValueError):
+            return None
+        url = extra.get("original_song_url") if isinstance(extra, dict) else None
+        return url if isinstance(url, str) and url else None
 
+    @property
+    def metrics(self) -> tuple[Metric, ...]:
         stats = self.statistics
         return (
-            Metric(label="点赞", value=format_num(_parse_num(stats.digg_count))),
-            Metric(label="评论", value=format_num(_parse_num(stats.comment_count))),
-            Metric(label="收藏", value=format_num(_parse_num(stats.collect_count))),
-            Metric(label="分享", value=format_num(_parse_num(stats.share_count))),
+            Metric(label="点赞", value=format_num(parse_count(stats.digg_count))),
+            Metric(label="评论", value=format_num(parse_count(stats.comment_count))),
+            Metric(label="收藏", value=format_num(parse_count(stats.collect_count))),
+            Metric(label="分享", value=format_num(parse_count(stats.share_count))),
+        )
+
+    @property
+    def author_metrics(self) -> tuple[Metric, ...]:
+        return (
+            Metric(label="获赞", value=format_num(parse_count(self.author.total_favorited))),
+            Metric(label="关注", value=format_num(parse_count(self.author.following_count))),
+            Metric(label="粉丝", value=format_num(parse_count(self.author.follower_count))),
         )
 
     @property
@@ -250,6 +307,19 @@ class CommentUser(Struct):
     avatar_thumb: UrlList = field(default_factory=UrlList)
 
 
+class CommentImage(Struct):
+    uri: str = ""
+    url_list: list[str] = field(default_factory=list)
+
+
+class CommentImageList(Struct):
+    origin_url: CommentImage = field(default_factory=CommentImage)
+
+
+class CommentSticker(Struct):
+    static_url: CommentImage = field(default_factory=CommentImage)
+
+
 class CommentItem(Struct):
     cid: str = ""
     aweme_id: str = ""
@@ -257,8 +327,11 @@ class CommentItem(Struct):
     text: str = ""
     user: CommentUser = field(default_factory=CommentUser)
     create_time: int = 0
+    image_list: list[CommentImageList] | None = None
+    sticker: CommentSticker | None = None
     ip_label: str | None = None
     reply_comment_total: int | str = 0
+    reply_comment: list[CommentItem] | None = None
 
 
 class CommentResponse(Struct):
@@ -296,6 +369,61 @@ def decode_aweme(payload: bytes | str | dict[str, object], *, detail: bool) -> A
     if not aweme.aweme_id:
         raise msgspec.ValidationError("响应中缺少 aweme_id")
     return aweme
+
+
+def parse_count(value: int | str | None) -> int:
+    try:
+        return int(value or 0)
+    except (ValueError, TypeError):
+        return 0
+
+
+def comment_limit(value: object) -> int:
+    try:
+        limit = int(str(value or 0))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(limit, 20))
+
+
+def decode_comments(
+    payload: bytes,
+    *,
+    limit: int,
+) -> list[Comment]:
+    response = msgspec.json.decode(payload, type=CommentResponse)
+    items = response.comments or []
+    return [_comment_to_card(item) for item in items[:limit] if item.text.strip() or item.reply_comment]
+
+
+def _comment_to_card(item: CommentItem) -> Comment:
+    replies: list[CommentReply] = []
+    for reply in (item.reply_comment or [])[:3]:
+        reply_text = reply.text.strip()
+        if reply_text:
+            replies.append(
+                CommentReply(
+                    author_name=reply.user.nickname or "抖音用户",
+                    text=reply_text,
+                    avatar_url=_avatar_url(reply.user),
+                    parent_author=item.user.nickname or None,
+                )
+            )
+    text = item.text.replace("[图片表情]", "").strip()
+    return Comment(
+        author_name=item.user.nickname or "抖音用户",
+        text=text,
+        avatar_url=_avatar_url(item.user),
+        location=item.ip_label,
+        timestamp=str(item.create_time) if item.create_time else None,
+        like_count=format_num(parse_count(item.digg_count)),
+        reply_count=format_num(parse_count(item.reply_comment_total)),
+        replies=tuple(replies),
+    )
+
+
+def _avatar_url(user: CommentUser) -> str | None:
+    return user.avatar_thumb.url_list[0] if user.avatar_thumb.url_list else None
 
 
 def select_video(aweme: Aweme, quality: str = "auto") -> SelectedVideo | None:

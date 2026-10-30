@@ -286,7 +286,7 @@ class XParser(BaseParser):
         return tuple(Metric(label=label, value=count_text(value)) for label, value in values if value > 0)
 
     def _create_image(self, url: str) -> ContentItem:
-        return self.create_image_contents([url], headers=self._media_headers())[0]
+        return self.create_image_contents([url], headers=self._media_headers(), proxy=self.proxy)[0]
 
     def _create_video(self, url: str, **kwargs: object) -> ContentItem:
         duration_val = float(str(kwargs.get("duration", 0.0) or 0.0))
@@ -296,14 +296,15 @@ class XParser(BaseParser):
             url,
             duration=duration_val,
             headers=self._media_headers(),
+            proxy=self.proxy,
             fallback_urls=fallbacks_seq,
         )
 
     def _create_dynamic(self, url: str) -> ContentItem:
-        return self.create_dynamic_contents([url], headers=self._media_headers())[0]
+        return self.create_dynamic_contents([url], headers=self._media_headers(), proxy=self.proxy)[0]
 
     def _create_graphic(self, url: str) -> ContentItem:
-        return self.create_image_contents([url], headers=self._media_headers())[0]
+        return self.create_image_contents([url], headers=self._media_headers(), proxy=self.proxy)[0]
 
     def _contents(self, tweet: XTweet) -> list[ContentItem]:
         return tweet_contents(

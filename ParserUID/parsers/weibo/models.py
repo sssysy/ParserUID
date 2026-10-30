@@ -121,6 +121,16 @@ def parse_weibo_timestamp(value: object) -> int:
         return 0
 
 
+def format_weibo_timestamp(value: int, fmt: str = "%Y-%m-%d %H:%M:%S") -> str | None:
+    """将秒级微博时间戳转换为卡片可读时间。"""
+    if value <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(value).strftime(fmt)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _author(payload: object) -> WeiboAuthor:
     user = _dict(payload)
     uid = _string(user.get("idstr") or user.get("id"))

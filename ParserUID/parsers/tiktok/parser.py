@@ -49,6 +49,8 @@ class TikTokParser(BaseParser):
             "http_headers": headers,
             "format": self._format_selector(self.get_config_value("video_quality", "auto")),
         }
+        if self.proxy:
+            opts["proxy"] = self.proxy
 
         def _sync_extract() -> TikTokInfo:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -73,7 +75,11 @@ class TikTokParser(BaseParser):
             "format": self._format_selector(self.get_config_value("video_quality", "auto")),
         }
         try:
-            return await self.downloader.download_with_ytdlp(url, custom_opts=custom_opts)
+            return await self.downloader.download_with_ytdlp(
+                url,
+                proxy=self.proxy,
+                custom_opts=custom_opts,
+            )
         except Exception as exc:
             logger.warning(f"[TikTok] 视频下载失败 | error={exc}")
             raise ParseException("TikTok 视频下载失败") from exc
@@ -112,5 +118,6 @@ class TikTokParser(BaseParser):
             None,
             lambda: self._download_video(video_url),
             duration=info.duration,
+            proxy=self.proxy,
         )
         return self.result([content])

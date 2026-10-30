@@ -45,10 +45,14 @@
     saveStatus: document.getElementById("save-status"),
     saveAll: document.getElementById("save-all"),
     discardAll: document.getElementById("discard-all"),
+    proxyUrl: document.getElementById("proxy-url"),
+    proxyMessage: document.getElementById("proxy-message"),
+    saveProxy: document.getElementById("save-proxy"),
     tabs: [...document.querySelectorAll("[data-tab]")],
     panels: {
       parsers: document.getElementById("panel-parsers"),
       skins: document.getElementById("panel-skins"),
+      network: document.getElementById("panel-network"),
     },
   };
 
@@ -917,6 +921,36 @@
     }
   }
 
+  async function loadProxy() {
+    try {
+      const data = await apiGet("proxy");
+      refs.proxyMessage.textContent = data?.message || "留空表示直连。";
+      refs.saveProxy.disabled = false;
+    } catch (error) {
+      refs.proxyMessage.textContent = `读取失败：${error.message || "未知错误"}`;
+      refs.saveProxy.disabled = true;
+    }
+  }
+
+  async function saveProxy() {
+    const value = refs.proxyUrl.value.trim();
+    refs.saveProxy.disabled = true;
+    refs.saveProxy.textContent = "保存中";
+    try {
+      const data = await apiPost("proxy", { value });
+      refs.proxyUrl.value = "";
+      refs.proxyMessage.textContent = data?.configured
+        ? "代理已保存，新任务将使用该代理。"
+        : "已清空代理，新任务将直连。";
+      showSnackbar("网络设置已保存");
+    } catch (error) {
+      showSnackbar(`保存失败：${error.message || "未知错误"}`);
+    } finally {
+      refs.saveProxy.disabled = false;
+      refs.saveProxy.textContent = "保存代理";
+    }
+  }
+
   async function loadParsers() {
     state.loadError = "";
     refs.parserList.innerHTML = `
@@ -950,7 +984,8 @@
   }
 
   function setActiveTab(name, updateHash = true) {
-    const active = name === "skins" ? "skins" : "parsers";
+    const active =
+      name === "skins" ? "skins" : name === "network" ? "network" : "parsers";
     for (const tab of refs.tabs) {
       const selected = tab.dataset.tab === active;
       tab.classList.toggle("is-active", selected);
@@ -974,6 +1009,7 @@
     setActiveTab(window.location.hash.slice(1));
     refs.saveAll.addEventListener("click", saveAllDrafts);
     refs.discardAll.addEventListener("click", discardAllDrafts);
+    refs.saveProxy.addEventListener("click", saveProxy);
   }
 
   function bindEvents() {
@@ -1011,7 +1047,7 @@
       }
     }
 
-    await Promise.all([loadParsers(), loadSkins()]);
+    await Promise.all([loadParsers(), loadSkins(), loadProxy()]);
     refreshGlobalSaveState();
   }
 

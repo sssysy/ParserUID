@@ -38,6 +38,16 @@ except ImportError:
     MissingAlbumPhotoException = Exception
 
 
+def _option_client(option: object) -> dict[str, object]:
+    """取得 jmcomic 选项中的 HTTP 客户端配置字典。"""
+    if not hasattr(option, "client"):
+        raise ParseException("当前 jmcomic 选项结构不支持代理配置")
+    client = option.client
+    if not isinstance(client, dict):
+        raise ParseException("当前 jmcomic 选项结构不支持代理配置")
+    return client
+
+
 class JMComicParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name="jmcomic", display_name="jmcomic")
     IMAGE_CONCURRENCY: ClassVar[int] = 16
@@ -46,11 +56,17 @@ class JMComicParser(BaseParser):
         if JmOption is None:
             raise ParseException("未安装 jmcomic 依赖库，请先安装后重载插件")
         option = JmOption.default()
-        proxy = self.get_config_value("use_proxy")
-        if proxy.lower() == "true":
-            postman = getattr(option, "client", {}).get("postman", {})
+        client = _option_client(option)
+        proxy = self.proxy
+        if proxy:
+            postman = client.setdefault("postman", {})
             meta = postman.setdefault("meta_data", {})
-            meta["proxies"] = self.downloader.cache_dir  # 占位值，也可以留空为 None
+            meta["proxies"] = {"https": proxy, "http": proxy}
+        cookie = self.get_config_value("cookie")
+        if cookie:
+            postman = client.setdefault("postman", {})
+            meta = postman.setdefault("meta_data", {})
+            meta["headers"] = {"Cookie": cookie}
         return option
 
     @staticmethod
@@ -106,7 +122,7 @@ class JMComicParser(BaseParser):
         async def download_and_decode(photo: JmPhotoItem) -> Path | None:
             async with semaphore:
                 try:
-                    raw_path = await self.downloader.download_image(photo.img_url)
+                    raw_path = await self.downloader.download_image(photo.img_url, proxy=self.proxy)
                     return await asyncio.to_thread(
                         self._decode_img,
                         photo.img_url,
@@ -205,7 +221,7 @@ class JMComicParser(BaseParser):
             cover_path: Path | None = None
             nsfw_mode = self.get_config_value("nsfw", "blur")
             if nsfw_mode != "ignore" and album_cover_url:
-                cover_path = await self.downloader.download_image(album_cover_url)
+                cover_path = await self.downloader.download_image(album_cover_url, proxy=self.proxy)
                 if nsfw_mode == "blur":
                     cover_path = await asyncio.to_thread(self._blur, cover_path)
 

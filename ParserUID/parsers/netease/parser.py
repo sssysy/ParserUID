@@ -162,6 +162,7 @@ class NeteaseParser(BaseParser):
                 target_audio_url,
                 filename=filename,
                 headers=MEDIA_HEADERS,
+                proxy=self.proxy,
             )
 
         audio = self.create_audio_content(loader=load_audio, duration=duration)

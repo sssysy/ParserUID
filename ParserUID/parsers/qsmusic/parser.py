@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import ClassVar
+from pathlib import Path
 from collections.abc import Sequence
 
 import httpx
@@ -49,11 +50,15 @@ class QSMusicParser(BaseParser):
         avatar = artist_avatar_url(track)
 
         headers = {"User-Agent": MOBILE_UA}
-        audio = self.create_audio_content(
-            track.url,
-            duration=duration,
-            headers=headers,
-        )
+
+        async def load_audio() -> Path:
+            return await self.downloader.download_audio(
+                track.url,
+                headers=headers,
+                proxy=self.proxy,
+            )
+
+        audio = self.create_audio_content(loader=load_audio, duration=duration)
         author = self.create_author(
             artist,
             avatar,

@@ -84,6 +84,7 @@ class PixivParser(BaseParser):
             cover_path = await self.downloader.download_image(
                 cover_url,
                 headers=self.media_headers,
+                proxy=self.proxy,
             )
             if blur:
                 return await asyncio.to_thread(blur_image, cover_path)
@@ -115,7 +116,11 @@ class PixivParser(BaseParser):
             paths: list[Path] = []
             for u in image_urls:
                 try:
-                    p = await self.downloader.download_image(u, headers=self.media_headers)
+                    p = await self.downloader.download_image(
+                        u,
+                        headers=self.media_headers,
+                        proxy=self.proxy,
+                    )
                     paths.append(p)
                 except Exception:
                     pass
@@ -146,6 +151,7 @@ class PixivParser(BaseParser):
             zip_url,
             filename=f"pixiv_ugoira_{pid}.zip",
             headers=self.media_headers,
+            proxy=self.proxy,
         )
         if as_pdf:
             output_path = cache_dir / f"pixiv_{pid}.pdf"
@@ -342,6 +348,7 @@ class PixivParser(BaseParser):
                 self.create_image_contents(
                     image_urls,
                     headers=self.media_headers,
+                    proxy=self.proxy,
                 )
             )
 

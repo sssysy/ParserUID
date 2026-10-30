@@ -129,12 +129,13 @@ class KuaiShouParser(BaseParser):
                     primary_url,
                     cover=None,
                     duration=photo.duration / 1000 if photo.duration > 0 else 0.0,
+                    proxy=self.proxy,
                     fallback_urls=backup_urls,
                 )
             ]
         image_urls = photo.image_urls
         if image_urls:
-            return [c for c in self.create_image_contents(image_urls)]
+            return [c for c in self.create_image_contents(image_urls, proxy=self.proxy)]
         return []
 
     @staticmethod

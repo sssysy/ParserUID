@@ -21,6 +21,7 @@ from .models import (
     decode_comments,
     decode_long_text,
     parse_weibo_timestamp,
+    format_weibo_timestamp,
 )
 from .content import comment_text, clean_status_text, parse_article_blocks
 from ...sender import ContentItem
@@ -261,7 +262,8 @@ class WeiboParser(BaseParser):
 
     async def parse_status(self, weibo_id: str) -> Sequence[ContentItem]:
         status = await self._fetch_status(weibo_id)
-        return await self._build_status_result(status, include_comments=True)
+        include_comments = self.get_config_value("include_comments", "true").lower() == "true"
+        return await self._build_status_result(status, include_comments=include_comments)
 
     async def _build_status_result(
         self,
@@ -274,6 +276,7 @@ class WeiboParser(BaseParser):
         author = self._author(status)
         comments = await self._fetch_comments(status) if include_comments else ()
         repost = await self._build_repost_card(status)
+        timestamp = format_weibo_timestamp(status.timestamp)
         metrics = _metrics(
             ("转发", status.reposts_count),
             ("评论", status.comments_count),
@@ -288,6 +291,7 @@ class WeiboParser(BaseParser):
                 video_duration=f"{int(status.video.duration)}秒" if status.video.duration > 0 else None,
                 text=text,
                 url=status.url,
+                timestamp=timestamp,
                 metrics=metrics,
                 comments=comments,
                 repost=repost,
@@ -300,6 +304,7 @@ class WeiboParser(BaseParser):
                 cover_url=self._cover(status),
                 text=text,
                 url=status.url,
+                timestamp=timestamp,
                 metrics=metrics,
                 comments=comments,
                 repost=repost,
@@ -311,14 +316,17 @@ class WeiboParser(BaseParser):
             return None
         retweeted = status.retweeted
         retweet_text = clean_status_text(retweeted.html_text, retweeted.raw_text)
+        nested_repost = await self._build_repost_card(retweeted)
         return PreviewCard(
             platform_name=self.platform.name,
             platform_display_name=self.platform.display_name,
             title="转发微博",
             text=retweet_text,
             author=self._author(retweeted),
+            timestamp=format_weibo_timestamp(retweeted.timestamp),
             source_url=retweeted.url,
             cover_url=self._cover(retweeted),
+            repost=nested_repost,
         )
 
     def _status_contents(self, status: WeiboStatus) -> list[ContentItem]:
@@ -331,16 +339,20 @@ class WeiboParser(BaseParser):
                         pic.image_url,
                         cover=None,
                         headers=self.media_headers,
+                        proxy=self.proxy,
                     )
                 )
             else:
-                contents.extend(self.create_image_contents([pic.image_url], headers=self.media_headers))
+                contents.extend(
+                    self.create_image_contents([pic.image_url], headers=self.media_headers, proxy=self.proxy)
+                )
         if status.video is not None:
             contents.append(
                 self.create_video_content(
                     status.video.url,
                     duration=status.video.duration,
                     headers=self.media_headers,
+                    proxy=self.proxy,
                     fallback_urls=status.video.fallback_urls,
                 )
             )
@@ -465,6 +477,7 @@ class WeiboParser(BaseParser):
         )
         text = comment_text(data.get("text"))
         ts = parse_weibo_timestamp(data.get("real_date"))
+        timestamp = format_weibo_timestamp(ts)
         await self.send_info(
             title=str(data.get("title") or "") or "微博视频",
             card_type="video",
@@ -473,7 +486,7 @@ class WeiboParser(BaseParser):
             video_duration=f"{int(duration)}秒" if duration > 0 else None,
             text=text,
             url=f"https://video.weibo.com/show?fid={fid}",
-            extra_info=str(ts) if ts > 0 else None,
+            timestamp=timestamp,
         )
         return self.result(
             [
@@ -481,6 +494,7 @@ class WeiboParser(BaseParser):
                     candidates[0],
                     duration=duration,
                     headers=self.media_headers,
+                    proxy=self.proxy,
                     fallback_urls=candidates[1:],
                 )
             ]
@@ -504,7 +518,7 @@ class WeiboParser(BaseParser):
         contents: list[ContentItem] = []
         for kind, value in blocks:
             if kind == "image" and value:
-                contents.extend(self.create_image_contents([value], headers=self.media_headers))
+                contents.extend(self.create_image_contents([value], headers=self.media_headers, proxy=self.proxy))
         user = data.get("userinfo") if isinstance(data.get("userinfo"), dict) else {}
         author = self.create_author(
             str(user.get("screen_name") or "微博用户"),
@@ -513,6 +527,7 @@ class WeiboParser(BaseParser):
         )
         metrics = _metrics(("阅读", data.get("read_count")))
         cover = next((value for kind, value in blocks if kind == "image"), None)
+        timestamp = format_weibo_timestamp(parse_weibo_timestamp(data.get("create_at_unix")))
         await self.send_info(
             title=title,
             card_type="common",
@@ -521,6 +536,7 @@ class WeiboParser(BaseParser):
             text=text,
             url=str(data.get("url") or f"https://weibo.com/ttarticle/p/show?id={article_id}"),
             metrics=metrics,
+            timestamp=timestamp,
         )
         return self.result(contents)
 

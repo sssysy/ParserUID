@@ -58,10 +58,13 @@ class AcfunParser(BaseParser):
             raise ParseException("AcFun 视频信息为空")
         return info
 
-    async def _download_video(self, url: str, fallback_urls: list[str]) -> Path:
-        return await self.downloader.download_video(
+    async def _download_video(self, url: str, fallback_urls: list[str], acid: str) -> Path:
+        headers = self._get_headers()
+        return await self.downloader.download_m3u8_video(
             url,
-            headers=self._get_headers(),
+            filename=f"acfun_{acid}.mp4",
+            headers=headers,
+            proxy=self.proxy,
             fallback_urls=fallback_urls,
         )
 
@@ -100,6 +103,7 @@ class AcfunParser(BaseParser):
             cover_url=info.cover_url or None,
             text=info.text,
             url=page_url,
+            timestamp=info.timestamp,
             metrics=info.metrics,
             video_duration=f"{int(info.duration)}s" if info.duration > 0 else None,
             video_quality=quality_label(selected),
@@ -109,7 +113,8 @@ class AcfunParser(BaseParser):
         backup_urls = urls[1:]
         content = self.create_video_content(
             None,
-            lambda: self._download_video(primary_url, backup_urls),
+            lambda: self._download_video(primary_url, backup_urls, acid),
             duration=info.duration,
+            proxy=self.proxy,
         )
         return self.result([content])

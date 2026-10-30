@@ -1,6 +1,7 @@
 import asyncio
 from typing import Final, TypedDict
 from pathlib import Path
+from urllib.parse import urlparse
 
 import msgspec
 
@@ -33,6 +34,12 @@ CONFIG_DEFAULT: dict[str, GSC] = {
         title="解析引用内容",
         desc="开启后，当前消息没有链接时扫描被引用消息的正文和分享卡片。",
         data=True,
+    ),
+    "proxy_url": GsStrConfig(
+        title="代理地址",
+        desc="供启用“使用代理”的解析器共用，例如 http://127.0.0.1:7890；留空表示直连。",
+        data="",
+        regex=r"^(|https?://[^\s]+)$",
     ),
     "default_session_enabled": GsBoolConfig(
         title="新会话默认开启",
@@ -224,6 +231,23 @@ def default_skin_pack() -> str:
     """返回去掉空白后的皮肤包名，空值回落到 default。"""
     value = str(parser_config.get_config("default_skin_pack").data).strip()
     return value or DEFAULT_SKIN_PACK
+
+
+def proxy_url() -> str | None:
+    """返回校验后的全局 HTTP(S) 代理地址，空值或非法值视为直连。"""
+    raw = str(parser_config.get_config("proxy_url").data).strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is not None and not 1 <= port <= 65535:
+        return None
+    return raw
 
 
 async def set_session_enabled(session_key: str, enabled: bool) -> None:

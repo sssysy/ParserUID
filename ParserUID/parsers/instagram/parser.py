@@ -102,6 +102,8 @@ class InstagramParser(BaseParser):
             "no_warnings": True,
             "extract_flat": False,
         }
+        if self.proxy:
+            opts["proxy"] = self.proxy
         cookie = self.get_config_value("cookie")
         if cookie:
             opts["http_headers"] = {"Cookie": cookie}
@@ -208,6 +210,7 @@ class InstagramParser(BaseParser):
                     fmt = format_selector(self.get_config_value("video_quality", "auto"))
                     return await self.downloader.download_with_ytdlp(
                         target_url,
+                        proxy=self.proxy,
                         custom_opts={"format": fmt},
                     )
 
@@ -221,7 +224,7 @@ class InstagramParser(BaseParser):
                     )
                 )
                 continue
-            contents.extend(self.create_image_contents([media.url], headers=self.ig_headers))
+            contents.extend(self.create_image_contents([media.url], headers=self.ig_headers, proxy=self.proxy))
         return contents
 
 

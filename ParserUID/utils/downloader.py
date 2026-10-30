@@ -19,6 +19,7 @@ from PIL import Image, UnidentifiedImageError
 from gsuid_core.logger import logger
 from gsuid_core.data_store import get_res_path
 
+from .ffmpeg import FFmpegUnavailable, exec_ffmpeg_cmd
 from .exceptions import DownloadException
 
 DEFAULT_MAX_BYTES: Final = 500 * 1024 * 1024
@@ -28,6 +29,7 @@ CACHE_DIR: Final = get_res_path("ParserUID") / "cache"
 
 _CONNECT_TIMEOUT: Final = 15.0
 _READ_TIMEOUT: Final = 60.0
+_HLS_TIMEOUT: Final = 300.0
 _CHUNK_SIZE: Final = 64 * 1024
 _USER_AGENT: Final = "ParserUID/1.0 (+https://github.com/Genshin-bots/gsuid_core)"
 
@@ -52,9 +54,13 @@ class Downloader:
         except (PermissionError, OSError):
             pass
         self._client: httpx.AsyncClient | None = None
+        self._client_proxy: str | None = None
 
     async def get_client(self, proxy: str | None = None) -> httpx.AsyncClient:
         """惰性创建或复用 HTTP 客户端。"""
+        if self._client is not None and not self._client.is_closed and self._client_proxy != proxy:
+            await self._client.aclose()
+            self._client = None
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(_READ_TIMEOUT, connect=_CONNECT_TIMEOUT),
@@ -62,6 +68,7 @@ class Downloader:
                 proxy=proxy,
                 headers={"User-Agent": _USER_AGENT},
             )
+            self._client_proxy = proxy
         return self._client
 
     async def close(self) -> None:
@@ -69,6 +76,7 @@ class Downloader:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
+        self._client_proxy = None
 
     def _url_to_filename(self, url: str, default_suffix: str = "") -> str:
         digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
@@ -197,6 +205,105 @@ class Downloader:
             max_bytes=max_bytes,
         )
 
+    async def download_m3u8_video(
+        self,
+        url: str,
+        *,
+        filename: str | None = None,
+        headers: dict[str, str] | None = None,
+        proxy: str | None = None,
+        fallback_urls: Sequence[str] | None = None,
+        max_bytes: int = DEFAULT_MAX_BYTES,
+        timeout: float = _HLS_TIMEOUT,
+    ) -> Path:
+        """通过 FFmpeg 下载 HLS 并封装为本地 MP4。"""
+        candidates = [item for item in (url, *(fallback_urls or ())) if item]
+        if not candidates:
+            raise DownloadException("HLS 地址为空")
+
+        actual_name = filename or self._url_to_filename(candidates[0], default_suffix=".mp4")
+        target = self.cache_dir / actual_name
+        cached_size = (
+            await asyncio.to_thread(lambda: target.stat().st_size) if await asyncio.to_thread(target.is_file) else 0
+        )
+        if cached_size > 0:
+            return target
+
+        temporary = self.cache_dir / f".{target.stem}.{uuid.uuid4().hex}.tmp.mp4"
+        last_error: Exception | None = None
+        try:
+            for candidate_url in candidates:
+                await asyncio.to_thread(temporary.unlink, missing_ok=True)
+                try:
+                    await self._download_hls_candidate(
+                        candidate_url,
+                        temporary,
+                        headers=headers,
+                        proxy=proxy,
+                        max_bytes=max_bytes,
+                        timeout=timeout,
+                    )
+                    await asyncio.to_thread(os.replace, temporary, target)
+                    return target
+                except (DownloadException, TimeoutError, OSError, RuntimeError) as exc:
+                    last_error = exc
+                    logger.warning(
+                        f"[下载] HLS 地址失败，尝试备用地址 | "
+                        f"host={urlparse(candidate_url).hostname or 'unknown'} "
+                        f"| error_type={type(exc).__name__}"
+                    )
+        finally:
+            await asyncio.to_thread(temporary.unlink, missing_ok=True)
+        raise DownloadException(f"文件下载失败（尝试了 {len(candidates)} 个地址）：{last_error}") from last_error
+
+    async def _download_hls_candidate(
+        self,
+        url: str,
+        target: Path,
+        *,
+        headers: dict[str, str] | None,
+        proxy: str | None,
+        max_bytes: int,
+        timeout: float,
+    ) -> None:
+        request_headers = {"User-Agent": _USER_AGENT, **(headers or {})}
+        header_text = "\r\n".join(f"{name}: {value}" for name, value in request_headers.items())
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-headers",
+            f"{header_text}\r\n",
+        ]
+        if proxy:
+            cmd.extend(("-http_proxy", proxy))
+        cmd.extend(
+            (
+                "-i",
+                url,
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(target),
+            )
+        )
+        try:
+            code, _, stderr = await exec_ffmpeg_cmd(cmd, timeout=timeout)
+        except FFmpegUnavailable as exc:
+            raise DownloadException("未检测到 FFmpeg，无法下载 HLS 视频") from exc
+        if code != 0:
+            detail = stderr.decode("utf-8", errors="ignore").strip()
+            raise DownloadException(f"FFmpeg 下载 HLS 失败（退出码 {code}）：{detail[:300]}")
+
+        size = await asyncio.to_thread(lambda: target.stat().st_size) if await asyncio.to_thread(target.is_file) else 0
+        if size <= 0:
+            raise DownloadException("HLS 下载得到 0 字节文件")
+        if size > max_bytes:
+            raise DownloadException(f"文件大小超出限制（上限 {max_bytes} 字节）")
+
     async def download_with_ytdlp(
         self,
         url: str,
@@ -271,9 +378,14 @@ class Downloader:
 _GLOBAL_DOWNLOADER = Downloader()
 
 
-async def download_image(url: str, *, max_bytes: int = DEFAULT_IMAGE_MAX_BYTES) -> Path:
+async def download_image(
+    url: str,
+    *,
+    proxy: str | None = None,
+    max_bytes: int = DEFAULT_IMAGE_MAX_BYTES,
+) -> Path:
     """兼容旧调用接口的图片下载辅助函数。"""
-    return await _GLOBAL_DOWNLOADER.download_image(url, max_bytes=max_bytes)
+    return await _GLOBAL_DOWNLOADER.download_image(url, proxy=proxy, max_bytes=max_bytes)
 
 
 async def clean_image_cache(*, max_age_seconds: int = DEFAULT_CACHE_MAX_AGE_SECONDS) -> int:

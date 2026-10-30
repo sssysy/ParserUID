@@ -131,12 +131,16 @@ class QrLogin:
     link: str = ""
     auth_code: str = ""
     credential: BiliCredential | None = None
+    proxy: str | None = None
 
     async def generate_qrcode(self) -> bytes:
         import aiohttp
 
         params = _signed({"local_id": "0", "ts": int(time.time())})
-        async with aiohttp.ClientSession(headers=QR_REQUEST_HEADERS) as session:
+        async with aiohttp.ClientSession(
+            headers=QR_REQUEST_HEADERS,
+            proxy=self.proxy,
+        ) as session:
             async with session.post(TV_AUTH_CODE_URL, params=params) as response:
                 body = await response.read()
         if response.status != 200:
@@ -171,7 +175,10 @@ class QrLogin:
                 "ts": int(time.time()),
             }
         )
-        async with aiohttp.ClientSession(headers=QR_REQUEST_HEADERS) as session:
+        async with aiohttp.ClientSession(
+            headers=QR_REQUEST_HEADERS,
+            proxy=self.proxy,
+        ) as session:
             async with session.post(TV_POLL_URL, params=params) as response:
                 body = await response.read()
         if response.status != 200:
@@ -195,6 +202,8 @@ class QrLogin:
 
 async def refresh_credential(
     credential: BiliCredential,
+    *,
+    proxy: str | None = None,
 ) -> BiliCredential:
     import aiohttp
 
@@ -207,7 +216,10 @@ async def refresh_credential(
             "ts": int(time.time()),
         }
     )
-    async with aiohttp.ClientSession(headers=QR_REQUEST_HEADERS) as session:
+    async with aiohttp.ClientSession(
+        headers=QR_REQUEST_HEADERS,
+        proxy=proxy,
+    ) as session:
         async with session.post(REFRESH_TOKEN_URL, params=params) as response:
             body = await response.read()
     if response.status != 200:

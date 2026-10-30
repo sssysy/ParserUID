@@ -100,7 +100,13 @@ class TiebaParser(BaseParser):
             if item.kind == "image" and item.image is not None:
                 url = normalize_media_url(item.image.url, hosts=IMAGE_HOSTS)
                 if url:
-                    output.extend(self.create_image_contents([url], headers={"Referer": _REFERER}))
+                    output.extend(
+                        self.create_image_contents(
+                            [url],
+                            headers={"Referer": _REFERER},
+                            proxy=self.proxy,
+                        )
+                    )
                 continue
             if item.kind == "video" and item.video is not None:
                 output.append(
@@ -108,6 +114,7 @@ class TiebaParser(BaseParser):
                         item.video.url,
                         duration=item.video.duration,
                         headers={"Referer": _REFERER},
+                        proxy=self.proxy,
                     )
                 )
         return output

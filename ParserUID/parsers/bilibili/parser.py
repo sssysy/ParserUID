@@ -691,8 +691,16 @@ class BilibiliParser(BaseParser):
                 for video_url in videos:
                     for audio_url in audios:
                         try:
-                            v_tmp = await self.downloader.download_video(video_url, headers=self.media_headers)
-                            a_tmp = await self.downloader.download_audio(audio_url, headers=self.media_headers)
+                            v_tmp = await self.downloader.download_video(
+                                video_url,
+                                headers=self.media_headers,
+                                proxy=self.proxy,
+                            )
+                            a_tmp = await self.downloader.download_audio(
+                                audio_url,
+                                headers=self.media_headers,
+                                proxy=self.proxy,
+                            )
                             return await merge_av(video_path=v_tmp, audio_path=a_tmp, output_path=output_path)
                         except (ParseException, OSError) as exc:
                             last_error = exc
@@ -704,6 +712,7 @@ class BilibiliParser(BaseParser):
                         video_url,
                         filename=output_name,
                         headers=self.media_headers,
+                        proxy=self.proxy,
                     )
                 except (ParseException, OSError) as exc:
                     last_error = exc
@@ -713,6 +722,7 @@ class BilibiliParser(BaseParser):
             None,
             loader=load,
             duration=duration,
+            proxy=self.proxy,
         )
 
     async def close_session(self) -> None:
@@ -739,7 +749,10 @@ class BilibiliParser(BaseParser):
                 logger.warning("[哔哩哔哩] 凭证过期，缺少 access/refresh_token")
                 return self._credential
             try:
-                refreshed = await refresh_credential(self._credential)
+                refreshed = await refresh_credential(
+                    self._credential,
+                    proxy=self.proxy,
+                )
             except BiliAuthError as exc:
                 logger.warning(f"[哔哩哔哩] 凭证续期失败: {exc}")
                 return self._credential
@@ -750,7 +763,7 @@ class BilibiliParser(BaseParser):
             return self._credential
 
     async def login_with_qrcode(self) -> bytes:
-        self._qr_login = QrLogin()
+        self._qr_login = QrLogin(proxy=self.proxy)
         return await self._qr_login.generate_qrcode()
 
     async def complete_qr_login(self) -> PollResult:
@@ -927,9 +940,9 @@ class BilibiliParser(BaseParser):
         )
         contents: list[MediaContent] = []
         if dynamic.images:
-            contents = self.create_image_contents(dynamic.images, headers=self.media_headers)
+            contents = self.create_image_contents(dynamic.images, headers=self.media_headers, proxy=self.proxy)
         elif dynamic.cover:
-            contents = self.create_image_contents([dynamic.cover], headers=self.media_headers)
+            contents = self.create_image_contents([dynamic.cover], headers=self.media_headers, proxy=self.proxy)
         return self.result(contents)
 
     async def _parse_live_by_id(self, room_id: int):
@@ -966,7 +979,7 @@ class BilibiliParser(BaseParser):
             if url
         ]
         images = list(dict.fromkeys(images))
-        contents = self.create_image_contents(images, headers=self.media_headers)
+        contents = self.create_image_contents(images, headers=self.media_headers, proxy=self.proxy)
         text = "\n".join(
             part
             for part in (
@@ -1008,7 +1021,12 @@ class BilibiliParser(BaseParser):
         for media in fav.medias:
             if not media.cover:
                 continue
-            contents.extend(self.create_image_contents([clean_cover(media.cover) or media.cover]))
+            contents.extend(
+                self.create_image_contents(
+                    [clean_cover(media.cover) or media.cover],
+                    proxy=self.proxy,
+                )
+            )
         await self.send_info(
             card_type="common",
             title=f"收藏夹 - {fav.info.title}",
@@ -1038,6 +1056,7 @@ class BilibiliParser(BaseParser):
         contents = self.create_image_contents(
             [out for out in (clean_cover(bangumi.cover),) if out],
             headers=self.media_headers,
+            proxy=self.proxy,
         )
         await self.send_info(
             card_type="common",
@@ -1080,7 +1099,13 @@ class BilibiliParser(BaseParser):
         contents: list[MediaContent] = []
         for image in data.get("image_urls") or []:
             if isinstance(image, str) and is_allowed_media_host(image):
-                contents.extend(self.create_image_contents([normalize_url(image)], headers=self.media_headers))
+                contents.extend(
+                    self.create_image_contents(
+                        [normalize_url(image)],
+                        headers=self.media_headers,
+                        proxy=self.proxy,
+                    )
+                )
         await self.send_info(
             card_type="common",
             title=str(data.get("title") or "哔哩哔哩专栏"),

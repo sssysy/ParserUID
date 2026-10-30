@@ -39,12 +39,14 @@ class QQMusicDecrypter:
         mid: str,
         ekey: str,
         headers: dict[str, str],
+        proxy: str | None = None,
     ) -> None:
         self.downloader = downloader
         self.url = url
         self.mid = mid
         self.ekey = ekey
         self.headers = headers
+        self.proxy = proxy
 
     async def __call__(self) -> Path:
         suffix = _source_suffix(self.url)
@@ -52,6 +54,7 @@ class QQMusicDecrypter:
             self.url,
             filename=f"qqmusic_{self.mid}{suffix}",
             headers=self.headers,
+            proxy=self.proxy,
         )
         if not self.ekey:
             return await _ensure_audio_suffix(source)
@@ -128,6 +131,7 @@ class QQMusicParser(BaseParser):
             mid,
             ekey,
             headers,
+            self.proxy,
         )
 
         async def load_audio() -> Path:

@@ -1251,6 +1251,7 @@ class XiaoheiheClient:
                 headers=self.headers,
                 timeout=self.timeout,
                 impersonate="chrome",
+                proxy=self.proxy,
             )
         return self._session
 

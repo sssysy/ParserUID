@@ -73,12 +73,19 @@ class NGAParser(BaseParser):
                         self.create_image_contents(
                             [value],
                             headers=self.nga_headers,
+                            proxy=self.proxy,
                         )
                     )
                 elif show_text:
                     contents.append(TextContent(value))
         else:
-            contents.extend(self.create_image_contents(image_urls, headers=self.nga_headers))
+            contents.extend(
+                self.create_image_contents(
+                    image_urls,
+                    headers=self.nga_headers,
+                    proxy=self.proxy,
+                )
+            )
             if show_text and text_parts:
                 contents.append(TextContent("\n\n".join(text_parts)))
 

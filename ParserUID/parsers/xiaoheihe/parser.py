@@ -33,12 +33,27 @@ class XiaoheiheParser(BaseParser):
         cookie = self.get_config_value("cookie")
         if cookie:
             self.headers["cookie"] = cookie
+        self._client_proxy: str | None = None
         self.client = XiaoheiheClient(
             headers=self.headers,
-            proxy=None,
+            proxy=self.proxy,
             timeout=30,
             retries=2,
         )
+        self._client_proxy = self.proxy
+
+    def _sync_client_proxy(self) -> None:
+        proxy = self.proxy
+        if proxy == self._client_proxy:
+            return
+        client = XiaoheiheClient(
+            headers=self.headers,
+            proxy=proxy,
+            timeout=30,
+            retries=2,
+        )
+        self.client = client
+        self._client_proxy = proxy
 
     async def close(self) -> None:
         await self.client.close()
@@ -57,6 +72,7 @@ class XiaoheiheParser(BaseParser):
         r"api\.xiaoheihe\.cn/v3/bbs/app/api/web/share\?[A-Za-z0-9._%&+=/#@?;-]*link_id=(?P<link_id>[0-9a-z]+)",
     )
     async def _parse_post(self, searched: re.Match[str]) -> Sequence[ContentItem]:
+        self._sync_client_proxy()
         link_id = searched.groupdict().get("link_id") or ""
         result = await self.client.fetch_link_tree(link_id)
         raw_link = result.get("link")
@@ -78,6 +94,7 @@ class XiaoheiheParser(BaseParser):
         r"api\.xiaoheihe\.cn/game/share_game_detail\?[A-Za-z0-9._%&+=/#@?;-]*appid=(?P<appid>[0-9a-z]+)[A-Za-z0-9._%&+=/#@?;-]*game_type=(?P<game_type>[a-z]+)",
     )
     async def _parse_game(self, searched: re.Match[str]) -> Sequence[ContentItem]:
+        self._sync_client_proxy()
         groups = searched.groupdict()
         appid = (groups.get("appid") or "").strip()
         game_type = (groups.get("game_type") or "").strip().lower() or "pc"
@@ -110,16 +127,17 @@ class XiaoheiheParser(BaseParser):
                             value,
                             cover=None,
                             headers=self.headers,
+                            proxy=self.proxy,
                         )
                     )
                 else:
-                    contents.extend(self.create_image_contents([value], headers=self.headers))
+                    contents.extend(self.create_image_contents([value], headers=self.headers, proxy=self.proxy))
             if content.video_url:
                 contents.append(self._video_content(content.video_url))
         else:
             for kind, value, extra in content.segments:
                 if kind == "image":
-                    contents.extend(self.create_image_contents([value], headers=self.headers))
+                    contents.extend(self.create_image_contents([value], headers=self.headers, proxy=self.proxy))
                 elif kind == "live":
                     contents.append(
                         self.create_live_photo_content(
@@ -127,6 +145,7 @@ class XiaoheiheParser(BaseParser):
                             value,
                             cover=None,
                             headers=self.headers,
+                            proxy=self.proxy,
                         )
                     )
             if content.video_url:
@@ -168,7 +187,7 @@ class XiaoheiheParser(BaseParser):
     async def _finish_game(self, content: GameContent, url: str) -> Sequence[ContentItem]:
         show_text = bool(self.get_config_value("show_body_text", "true").lower() == "true")
         contents: list[ContentItem] = []
-        contents.extend(self.create_image_contents(content.image_urls, headers=self.headers))
+        contents.extend(self.create_image_contents(content.image_urls, headers=self.headers, proxy=self.proxy))
         for video_url, cover in content.video_urls:
             contents.append(self._video_content(video_url))
         if show_text and content.description:
@@ -194,7 +213,7 @@ class XiaoheiheParser(BaseParser):
         if path.endswith(".m3u8"):
 
             async def load_video():
-                return await self.downloader.download_with_ytdlp(url)
+                return await self.downloader.download_with_ytdlp(url, proxy=self.proxy)
 
             from ...utils.models import VideoContent
 
@@ -202,6 +221,7 @@ class XiaoheiheParser(BaseParser):
         return self.create_video_content(
             url,
             headers=self.headers,
+            proxy=self.proxy,
         )
 
 

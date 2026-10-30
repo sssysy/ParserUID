@@ -107,6 +107,7 @@ class YouTubeParser(BaseParser):
                 None,
                 lambda: self._download_video(target.url),
                 duration=video.duration,
+                proxy=self.proxy,
             )
         return self.result([content])
 
@@ -118,6 +119,8 @@ class YouTubeParser(BaseParser):
             "no_warnings": True,
             "http_headers": self._get_headers(),
         }
+        if self.proxy:
+            opts["proxy"] = self.proxy
 
         def _sync_extract() -> VideoData:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -147,7 +150,11 @@ class YouTubeParser(BaseParser):
             custom_opts["download_ranges"] = f"0-{clip_str}"
 
         try:
-            return await self.downloader.download_with_ytdlp(url, custom_opts=custom_opts)
+            return await self.downloader.download_with_ytdlp(
+                url,
+                proxy=self.proxy,
+                custom_opts=custom_opts,
+            )
         except Exception as exc:
             logger.warning(f"[YouTube] 视频下载失败 | error={exc}")
             raise ParseException(f"YouTube 视频下载失败：{exc}") from exc
@@ -158,7 +165,11 @@ class YouTubeParser(BaseParser):
             "http_headers": self._get_headers(),
         }
         try:
-            return await self.downloader.download_with_ytdlp(url, custom_opts=custom_opts)
+            return await self.downloader.download_with_ytdlp(
+                url,
+                proxy=self.proxy,
+                custom_opts=custom_opts,
+            )
         except Exception as exc:
             logger.warning(f"[YouTube] 音频下载失败 | error={exc}")
             raise ParseException(f"YouTube 音频下载失败：{exc}") from exc

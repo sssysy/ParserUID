@@ -1246,6 +1246,20 @@ svg {
   margin: 0 auto;
 }
 
+.network-section {
+  overflow: hidden;
+}
+
+.network-form {
+  padding: 4px 20px 20px;
+}
+
+.network-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 .content-header {
   padding: 20px 0 12px;
 }

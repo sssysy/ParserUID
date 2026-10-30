@@ -45,7 +45,7 @@ class IwaraParser(BaseParser):
             "Referer": "https://www.iwara.tv/",
         }
         cookie = self.get_config_value("cookie")
-        return IwaraClient(cookie=cookie, headers=headers)
+        return IwaraClient(cookie=cookie, headers=headers, proxy=self.proxy)
 
     @handle(
         "iwara.tv/video",
@@ -94,6 +94,7 @@ class IwaraParser(BaseParser):
             download_url,
             duration=duration,
             headers={"Referer": "https://www.iwara.tv/"},
+            proxy=self.proxy,
         )
         return self.result([video_item])
 
@@ -177,7 +178,11 @@ class IwaraParser(BaseParser):
         if not url:
             return None
         nsfw_mode = self.get_config_value("nsfw", "blur")
-        cover_path = await self.downloader.download_image(url, headers={"Referer": "https://www.iwara.tv/"})
+        cover_path = await self.downloader.download_image(
+            url,
+            headers={"Referer": "https://www.iwara.tv/"},
+            proxy=self.proxy,
+        )
         if rating == "ecchi" and nsfw_mode == "blur":
             return await asyncio.to_thread(self._blur, cover_path)
         return cover_path
@@ -191,6 +196,7 @@ class IwaraParser(BaseParser):
                 path = await self.downloader.download_image(
                     img_url,
                     headers={"Referer": "https://www.iwara.tv/"},
+                    proxy=self.proxy,
                 )
                 if should_blur:
                     return await asyncio.to_thread(self._blur, path)

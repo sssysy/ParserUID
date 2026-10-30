@@ -6,6 +6,7 @@ import json
 import asyncio
 from typing import Final, TypedDict
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
@@ -18,7 +19,7 @@ from gsuid_core.webconsole.plugin_page import (
     register_plugin_page,
 )
 
-from .config import parser_config, default_skin_pack
+from .config import proxy_url, parser_config, default_skin_pack
 from .parsers.config import (
     ParserManifest,
     ParserFieldValue,
@@ -103,6 +104,10 @@ class SaveParsersRequest(BaseModel):
 
 class SaveSkinRequest(BaseModel):
     name: str
+
+
+class SaveProxyRequest(BaseModel):
+    value: str
 
 
 class BilibiliCredential(TypedDict):
@@ -350,6 +355,46 @@ async def list_skins() -> object:
         "message": f"当前使用的卡片皮肤为 {current_skin}。",
     }
     return api_ok(response_data)
+
+
+@api.get("/parser-settings/proxy")
+async def get_proxy() -> object:
+    """返回全局代理状态，不回显可能包含凭据的原始地址。"""
+    configured = proxy_url() is not None
+    return api_ok(
+        {
+            "configured": configured,
+            "message": "已配置代理；留空保存会改为直连。" if configured else "当前直连，未配置代理。",
+        }
+    )
+
+
+def _validated_proxy(value: str) -> tuple[str | None, str | None]:
+    raw = value.strip()
+    if not raw:
+        return None, None
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None, "代理地址必须是 http:// 或 https:// 地址"
+    try:
+        port = parsed.port
+    except ValueError:
+        return None, "代理端口无效"
+    if port is not None and not 1 <= port <= 65535:
+        return None, "代理端口无效"
+    return raw, None
+
+
+@api.post("/parser-settings/proxy")
+async def save_proxy(req: SaveProxyRequest) -> object:
+    """保存全局代理地址；地址规则与运行时选择使用同一语义。"""
+    value, error = _validated_proxy(req.value)
+    if error is not None:
+        return api_fail(error, status=400)
+    updated = await asyncio.to_thread(parser_config.set_config, "proxy_url", value or "")
+    if not updated:
+        return api_fail("代理设置保存失败", status=500)
+    return api_ok({"configured": value is not None})
 
 
 @api.post("/parser-settings/skin")
