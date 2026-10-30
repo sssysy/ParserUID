@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "name": "telegram",
+  "display_name": "Telegram",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "hint": "Telegram 链接通常需要代理访问",
+      "default": false
+    },
+    "cookie": {
+      "type": "text",
+      "label": "Cookie",
+      "hint": "可选；包含 stel_ssid 等网页 Cookie",
+      "secret": true,
+      "default": ""
+    },
+    "include_link_preview": {
+      "type": "bool",
+      "label": "显示链接预览",
+      "default": true
+    },
+    "include_poll": {
+      "type": "bool",
+      "label": "显示投票内容",
+      "default": true
+    },
+    "include_buttons": {
+      "type": "bool",
+      "label": "显示内联按钮",
+      "default": true
+    },
+    "show_unsupported_media": {
+      "type": "bool",
+      "label": "提示受限媒体",
+      "default": true
+    }
+  }
+}

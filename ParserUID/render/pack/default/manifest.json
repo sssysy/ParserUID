@@ -1,0 +1,10 @@
+{
+  "name": "default",
+  "display_name": "默认皮肤",
+  "version": "1.0.0",
+  "templates": {
+    "default": "common.html",
+    "common": "common.html",
+    "video": "video.html"
+  }
+}

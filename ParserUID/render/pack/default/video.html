@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{width:100%;background:#08090b;color:#f7f7f5;font-family:"MiSans","PingFang SC","Microsoft YaHei",sans-serif}
+        .card{position:relative;width:1000px;min-height:360px;overflow:hidden;background:#08090b}
+        .ambient{display:block;width:1000px;height:100%;object-fit:cover;position:absolute;left:0;top:0;z-index:0}
+        .wash{position:absolute;left:0;top:0;width:1000px;height:100%;z-index:1;background:linear-gradient(180deg,rgba(8,9,11,.32),rgba(8,9,11,.58) 52%,rgba(8,9,11,.72))}
+        .shell{position:relative;z-index:2;padding:38px 42px 34px}
+        .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;min-height:88px}
+        .creator{display:flex;align-items:center;gap:18px;min-width:0;flex:1}
+        .avatar{width:78px;height:78px;flex:0 0 78px;display:block;border-radius:39px}
+        .creator-main{min-width:0}
+        .creator-name{font-size:28px;font-weight:700;line-height:1.22;color:#f7f7f5;white-space:nowrap}
+        .creator-meta{display:flex;align-items:center;gap:9px;margin-top:9px;font-size:15px;color:rgba(247,247,245,.62);white-space:nowrap}
+        .dot{width:3px;height:3px;border-radius:2px;background:rgba(247,247,245,.36)}
+        .top-right{display:flex;flex-direction:column;align-items:flex-end;gap:18px;flex:0 0 auto}
+        .brand{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:700;color:rgba(247,247,245,.84);letter-spacing:.08em}
+        .brand img{width:27px;height:27px;display:block}
+        .signals{display:flex;gap:28px}
+        .signal{min-width:70px;text-align:right}
+        .signal-head{display:flex;align-items:center;justify-content:flex-end;gap:5px;font-size:11px;color:rgba(247,247,245,.58);font-weight:600}
+        .signal-head img{width:14px;height:14px;display:block;opacity:.82}
+        .signal-value{margin-top:6px;font-size:18px;line-height:1;font-weight:700;color:#f7f7f5}
+        .hero{position:relative;width:1000px;height:540px;margin:24px -42px 0;overflow:hidden;background:transparent}
+        .hero-img{display:block;width:1000px;height:540px;object-fit:cover}
+        .hero-top{position:absolute;left:22px;right:22px;top:34px;display:flex;justify-content:flex-end;gap:8px}
+        .fact{padding:7px 12px;border:1px solid rgba(255,255,255,.2);border-radius:999px;background:rgba(7,8,10,.52);color:rgba(255,255,255,.92);font-size:13px;font-weight:700;line-height:1}
+        .hero-bottom{position:absolute;left:22px;right:22px;bottom:34px;display:flex;align-items:flex-end;justify-content:space-between}
+        .duration{display:flex;align-items:center;gap:9px;padding:10px 15px 10px 12px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(7,8,10,.58);color:rgba(255,255,255,.95);font-size:18px;font-weight:700}
+        .duration img{width:18px;height:18px;display:block;opacity:.8}
+        .play{display:flex;align-items:center;justify-content:center;width:60px;height:60px;border:1px solid rgba(255,255,255,.24);border-radius:30px;background:rgba(7,8,10,.4);box-shadow:0 12px 34px rgba(0,0,0,.28)}
+        .play img{width:24px;height:24px;display:block;margin-left:3px}
+        .content{padding:8px 42px 0}
+        .title{font-size:40px;line-height:1.28;font-weight:700;letter-spacing:-.012em;color:#f7f7f5}
+        .copy{margin-top:20px;font-size:21px;line-height:1.72;color:rgba(247,247,245,.72);white-space:pre-wrap}
+        .comments{margin-top:32px;padding-top:23px;border-top:1px solid rgba(255,255,255,.11)}
+        .comments-title{font-size:25px;font-weight:700;line-height:1.2;color:rgba(247,247,245,.62)}
+        .comment{display:flex;gap:14px;margin-top:22px}
+        .comment-avatar{width:48px;height:48px;flex:0 0 48px;display:block;border-radius:24px;background:rgba(255,255,255,.12)}
+        .comment-main{min-width:0;flex:1}
+        .comment-head{font-size:18px;font-weight:700;color:rgba(247,247,245,.74)}
+        .reply-to{color:rgba(247,247,245,.4);font-weight:400}
+        .comment-copy{margin-top:6px;font-size:18px;line-height:1.62;color:rgba(247,247,245,.84);white-space:pre-wrap}
+        .comment-meta{display:flex;gap:16px;margin-top:8px;font-size:13px;color:rgba(247,247,245,.4)}
+        .comment-meta span{display:flex;align-items:center;gap:5px}
+        .comment-meta img{width:13px;height:13px;display:block;opacity:.7}
+        .replies{margin-top:14px;padding:14px 16px;border:1px solid rgba(255,255,255,.075);border-radius:16px;background:rgba(255,255,255,.035)}
+        .reply-comment{margin-top:0;gap:10px}
+        .reply-comment .comment-avatar{width:30px;height:30px;flex:0 0 30px}
+        .reply-comment .comment-head{font-size:15px}
+        .reply-comment .comment-copy{font-size:15px;line-height:1.55}
+        .extra{margin-top:22px;padding:16px 18px;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:rgba(255,255,255,.05);font-size:15px;line-height:1.65;color:rgba(247,247,245,.6)}
+        .profile{display:flex;align-items:center;gap:16px;margin-top:28px;padding:19px 21px;border:1px solid rgba(255,255,255,.11);border-radius:22px;background:linear-gradient(110deg,rgba(255,255,255,.075),rgba(255,255,255,.035))}
+        .profile-avatar{width:60px;height:60px;flex:0 0 60px;display:block;border-radius:30px}
+        .profile-main{min-width:0;flex:1}
+        .profile-name{font-size:21px;font-weight:700;color:#f7f7f5}
+        .profile-note{margin-top:5px;font-size:13px;color:rgba(247,247,245,.62)}
+        .profile-stats{display:flex;gap:24px}
+        .profile-stat{text-align:right}
+        .profile-stat div:first-child{font-size:12px;color:rgba(247,247,245,.58)}
+        .profile-stat div:last-child{margin-top:5px;font-size:18px;font-weight:700;color:#f7f7f5}
+        .footer{display:flex;justify-content:center;align-items:center;margin-top:14px;font-size:12px;font-weight:500;letter-spacing:.03em;color:rgba(247,247,245,.38);text-align:center}
+    </style>
+</head>
+{% from "macros.html" import render_avatar, render_signals, render_comments, render_metric_icon %}
+<body>
+<main class="card">
+    {% if card.ambient_uri %}<img class="ambient" src="{{ card.ambient_uri }}" alt="">{% endif %}
+    <div class="wash"></div>
+    <div class="shell">
+        <header class="topbar">
+            <div class="creator">
+                {{ render_avatar(card.author_avatar_uri) }}
+                <div class="creator-main">
+                    <div class="creator-name">{{ card.author_name }}</div>
+                    <div class="creator-meta">
+                        <span>{{ card.timestamp or "" }}</span><span class="dot"></span>
+                        <span>用户 ID：{{ card.author_uid or "" }}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="top-right">
+                <div class="brand">
+                    {% if card.platform_logo_uri %}<img src="{{ card.platform_logo_uri }}" alt="">{% endif %}
+                    <span>{{ card.platform_display_name }}</span>
+                </div>
+                <div class="signals">{{ render_signals(card.metrics) }}</div>
+            </div>
+        </header>
+        <section class="hero">
+            <img class="hero-img" src="{{ card.hero_uri or card.empty_image_placeholder }}" alt="">
+            <div class="hero-top"><span class="fact">{{ card.video_quality or "" }}</span></div>
+            <div class="hero-bottom">
+                {% if card.video_duration %}
+                    <div class="duration">{{ render_metric_icon(card.clock_icon_uri) }}<span>{{ card.video_duration }}</span></div>
+                {% endif %}
+                <div class="play">{{ render_metric_icon(card.play_icon_uri) }}</div>
+            </div>
+        </section>
+        <section class="content">
+            <div class="title">{{ card.title }}</div>
+            <div class="copy">{{ card.text }}</div>
+            {{ render_comments(card.comments) }}
+            {% if card.extra_info %}<div class="extra">{{ card.extra_info }}</div>{% endif %}
+            <div class="profile">
+                {% if card.author_avatar_uri %}<img class="profile-avatar" src="{{ card.author_avatar_uri }}" alt="">{% endif %}
+                <div class="profile-main">
+                    <div class="profile-name">{{ card.author_name }}</div>
+                    <div class="profile-note">{{ card.author_description or "" }}</div>
+                </div>
+                <div class="profile-stats">
+                    {% for item in card.author_metrics %}
+                        <div class="profile-stat"><div>{{ item.label }}</div><div>{{ item.value }}</div></div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="footer">{{ card.footer }}</div>
+        </section>
+    </div>
+</main>
+</body>
+</html>

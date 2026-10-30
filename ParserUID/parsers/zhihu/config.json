@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "name": "zhihu",
+  "display_name": "知乎",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "default": false
+    },
+    "cookie": {
+      "type": "text",
+      "label": "Cookie",
+      "hint": "可选；包含 z_c0、d_c0、_xsrf 等",
+      "secret": true,
+      "default": ""
+    },
+    "include_comments": {
+      "type": "bool",
+      "label": "卡片显示评论",
+      "default": true
+    },
+    "question_first_answer": {
+      "type": "bool",
+      "label": "问题页附带首条回答",
+      "default": true
+    },
+    "video_quality": {
+      "type": "select",
+      "label": "视频清晰度",
+      "options": [
+        "auto",
+        "FHD",
+        "HD",
+        "SD"
+      ],
+      "default": "auto"
+    }
+  }
+}

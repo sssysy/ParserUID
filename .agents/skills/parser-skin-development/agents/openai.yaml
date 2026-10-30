@@ -1,0 +1,4 @@
+interface:
+  display_name: "ParserUID 皮肤开发"
+  short_description: "用于创建、修改和验证 ParserUID 卡片皮肤包"
+  default_prompt: "Use $parser-skin-development to build a Jinja-based ParserUID skin pack with manifest.json and HTML templates."

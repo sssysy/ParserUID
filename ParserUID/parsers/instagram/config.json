@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "name": "instagram",
+  "display_name": "Instagram",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "hint": "Instagram 通常需要代理访问",
+      "default": false
+    },
+    "cookie": {
+      "type": "text",
+      "label": "Cookie",
+      "hint": "可选；包含 sessionid 等网页 Cookie",
+      "secret": true,
+      "default": ""
+    },
+    "video_quality": {
+      "type": "select",
+      "label": "视频清晰度",
+      "options": [
+        "auto",
+        "1080p",
+        "720p",
+        "480p"
+      ],
+      "default": "auto"
+    }
+  }
+}

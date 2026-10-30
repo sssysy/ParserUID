@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "name": "x",
+  "display_name": "X",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "default": false
+    },
+    "cookie": {
+      "type": "text",
+      "label": "Cookie",
+      "hint": "可选；敏感内容、高清视频或部分受限推文可能需要网页 Cookie",
+      "secret": true,
+      "default": ""
+    },
+    "translate": {
+      "type": "bool",
+      "label": "显示 Grok 翻译",
+      "hint": "展示 X 官方自动翻译（需填写 Cookie 时可用）",
+      "default": false
+    },
+    "include_quoted_media": {
+      "type": "bool",
+      "label": "附带引用推文媒体",
+      "hint": "卡片始终展示引用推文，开启后引用的媒体也作为独立内容发送",
+      "default": false
+    },
+    "include_link_card": {
+      "type": "bool",
+      "label": "显示链接卡片",
+      "hint": "在文字卡片中展示 X 附带的外部链接标题与站点信息",
+      "default": true
+    },
+    "sensitive_mode": {
+      "type": "select",
+      "label": "敏感内容处理",
+      "hint": "warn 发送内容并在卡片提示；skip 遇到敏感内容跳过",
+      "options": [
+        "warn",
+        "skip"
+      ],
+      "default": "warn"
+    }
+  }
+}

@@ -1,0 +1,298 @@
+# 六、AI Session 路由与 Persona
+
+> **返回主入口**：[`../SKILL.md`](../SKILL.md) · **上一章**：[五、Bot 三类](./05-bot-classes.md) · **下一章**：[七、工具注册表与 Agent 装配](./07-tool-registry-and-agent.md)
+
+本章讲：一条消息怎么找到/创建对应的 `GsCoreAIAgent` 会话、Session ID 怎么设计、会话怎么
+防 OOM、Persona 怎么配置与热重载。
+
+## 6.1 Session ID 设计（关键）
+
+`Event.session_id` 属性自动生成：
+
+```
+群聊: f"{WS_BOT_ID}:{bot_id}:{bot_self_id}:group:{group_id}"
+      例: "ws-onebot:onebot:bot_001:group:789012"
+私聊: f"{WS_BOT_ID}:{bot_id}:{bot_self_id}:private:{user_id}"
+      例: "ws-onebot:onebot:bot_001:private:345678"
+HTTP Agent:
+      `HTTP_AGENT:{bot_id}:{key_id}_{client_session}:private:{key.user_id}`
+      同 user_id 多钥不共享 Agent/history，共享预算与 USER_GLOBAL 记忆/好感。
+```
+
+> **群聊 Session ID 不含 `user_id`**——群内所有用户共享同一个 Session 与记忆。这是历史致命
+> 缺陷 D-1 的修复：旧格式 `{bid}%%%{gid}%%%{uid}` 绑了 user_id，导致"群里每个人各和 AI 聊各
+> 的、互相没有上下文"。私聊才用 `user_id` 保证一对一独立。
+>
+> 配套：`HistoryManager` 群聊时把 `storage_event` 的 `user_id` **置空**，确保同群所有消息共享
+> 同一个 deque。改 Session 标识时必须同时维护这个不变量。
+
+## 6.2 AI Router（`ai_router.py`）
+
+```python
+async def get_ai_session(event: Event) -> GsCoreAIAgent:
+    return await _get_or_create_ai_session(event)
+```
+
+`_get_or_create_ai_session` 流程：
+
+```
+1. session_id = event.session_id
+2. history_manager.update_session_access(event)
+3. registry.get_ai_session(session_id) 查已有
+4. 已有 → 检查 _check_persona_changed()，变了则热重载（移除旧 + 重建）
+5. 无/需重建 → get_persona_for_session() 取 persona_name
+   └── 返回 None → raise ValueError（没配 persona，不该进到这）
+6. context_assembly.build_session_system_prompt(event, persona_name) 构建 system_prompt
+   （persona + 群简介 + 稳定前缀；评测端点 chat_with_history 同源消费，§5.3 装配统一）
+7. create_agent(system_prompt, persona_name, create_by="Chat")
+8. registry.set_ai_session(session_id, session)
+```
+
+> **身份不变量（system_prompt 内，`persona/prompts.py::SYSTEM_CONSTRAINTS`）**：
+> **用户ID 仅供内部认人、绝不对外输出**。群聊靠 ID 区分发言人——历史经
+> `format_history_for_agent` 渲染成 `id(昵称)`、当前轮经 `_build_relationship_description`
+> 也带 `用户名(用户ID:…)`——但**回复对外只用昵称或已记的别名**（【群成员称呼】），
+> 既无昵称也无别名时用角色化泛称带过。ID 唯一允许出现在输出的场合是 `@用户ID` 语法
+> （由 `send_chat_result` 解析成真正的 @，见 [§04](./04-event-trigger-flow.md)）。原
+> 「说话者感知 / 人际关系感知」两段重复内容已合并为一段「当前状态感知」去重。
+
+## 6.3 消息历史与 AI 会话已解耦（两个独立模块）
+
+| 模块 | 类 | 文件 | 职责 |
+|------|----|----|----|
+| 消息历史 | `HistoryManager` | `gsuid_core/message_history/manager.py` | 记录 Bot 输入/输出历史，**与 AI 无关**，AI 关了也记 |
+| AI 会话注册表 | `AISessionRegistry` | `ai_core/session_registry.py` | `GsCoreAIAgent` 对象注册与生命周期，仅 AI 开启时用 |
+
+```python
+class AISessionRegistry:
+    _ai_sessions: Dict[str, Any]   # session_id -> GsCoreAIAgent
+    def get_ai_session(self, session_id): ...
+    def set_ai_session(self, session_id, session): ...
+```
+
+## 6.4 内存保护（**不存在 OOM 风险**，多重防线）
+
+| 机制 | 所属 | 配置 | 效果 |
+|------|------|------|------|
+| 滚动记录 | `HistoryManager` | `RETAIN_SECONDS=12h` | 每 Session 保留最近 12 小时，跨过零点的仍留着 |
+| Token 计数 | `HistoryManager` | 只统计，不按 token 删 | 12 小时窗口里的长文仍占内存 |
+| AI 历史限制 | `AISessionRegistry` | `MAX_AI_HISTORY_LENGTH=30` | AI 对话历史 ≤ 30 条 |
+| Agent 内部截断 | `GsCoreAIAgent` | `agent_max_history` 默认 **30**（可配） | 超水位 **保头裁中段**（`compact_session_history`） |
+| 空闲清理 | `AISessionRegistry` | `IDLE_THRESHOLD=1800`(30min) | 30 分钟不活跃 Session 自动清除 |
+| 定时清理 | `AISessionRegistry` | `CLEANUP_INTERVAL=3600`(1h) | 每小时检查一次 |
+
+> ⚠️ **隐形 Token 爆炸**：`HistoryManager` 按 12 小时留消息，长文仍占内存。
+> 所以 `GsCoreAIAgent.extract_history` 走
+> **`compact_session_history`（保头裁中段 + 工具配对）**——**永不砍 `history[0]`**，只丢中间段、
+> 留近期尾，保证 provider **前缀缓存**头部字节跨 compact 不变。配对保护见
+> `_truncate_history_keep_prefix` / `_drop_orphan_tool_results`。
+> **禁止**再把角色锚点插回头部（会平移前缀）。详见 [§12.7](./12-developer-pitfalls.md)。
+
+## 6.5 Persona Prompt 热重载（mtime 检测）
+
+历史缺陷 D-3：Session 一旦创建 `system_prompt` 就固定，管理员改了人设老用户不生效。修复：
+
+```python
+def _check_persona_changed(session, persona_name) -> bool:
+    if session.persona_name != persona_name:
+        return True
+    current = _get_persona_mtime(persona_name)
+    # 记在这一路会话上。按人格记一份，先开口的那路会把时间写新，其余群不再重载。
+    return current > session.persona_source_mtime
+```
+
+检测到 persona 文件或该人格所用提示词组的 mtime 变化 → 移除这一路 Session 并重建。
+同一人格的每一路会话各自记住建提示词时的 mtime。`GsCoreAIAgent` 有 `persona_name`
+属性追踪，`create_agent()` 支持 `persona_name` 参数。
+
+## 6.6 Persona 配置系统（`persona/config.py`）
+
+### 配置文件布局
+
+```
+RESOURCE_PATH/persona/{persona_name}/
+├── config.json          # Persona 配置（启用范围 / 巡检 / 工具装配）
+├── persona.json         # 称呼与用户可见短句（GSC，控制台「人格设定」）
+├── persona.md           # 角色设定（Markdown）
+├── avatar.png / image.png   # 头像 / 立绘（可选）
+├── appearance.txt           # 视觉指纹（启动识图；system 只吃摘要）
+├── self_refs/               # 可选：表情包/变体，只入库 pHash
+└── audio.{mp3,ogg,wav,m4a,flac}   # 音频（可选，优先级 mp3 > ogg > wav > m4a > flac）
+```
+
+### `DEFAULT_PERSONA_CONFIG`
+
+| 配置项 | 类型 | 默认 | 说明 |
+|--------|------|------|------|
+| `ai_mode` | List[str] | `["提及应答"]` | AI 行动模式 |
+| `scope` | str | `"disabled"` | 启用范围 |
+| `target_groups` | List[str] | `[]` | 目标群聊 |
+| `inspect_interval` | int | `60` | 巡检间隔（分钟） |
+| `keywords` | List[str] | `[]` | 唤醒关键词 |
+| `speech_len_soft` | int | `60` | 建议字数。**留默认即跟随 `chat_style` 派生**。系统提示只写这一条，没有硬上限 |
+| `chat_style` | int | `50` | **说话强度** 0 到 100：0=惜字如金 / 50=默认 / 100=连珠炮 |
+| `enabled_tools` | List[str] | `["*"]` | 启用工具（按插件），管辖向量检索池。`*`=全部插件；`!插件名`=排除；只列具体名=仅这些。空列表=一个都不启用 |
+| `tool_names` | List[str] | `[]` | 显式工具白名单（常驻直装，不经向量检索） |
+| `capability_agents` | List[str] | `["*"]` | 可委派能力代理 node_id。`*`=全部；`!render_agent` 禁用出图。空列表=不可委派 |
+
+#### `chat_style`：发言**形态**档（`persona/chat_style.py`，2026-09-28）
+
+与 `relationship/zones.py` **正交且不重叠**：zone 管「对这个人什么态度」（冷热 / 主动与否），
+`chat_style` 管「发成什么形状」（几条 / 多长 / 怎么分段）。刻意不合并——`zones` 要求同一语义
+只有一处定义，**欲望不在 persona 配置里开第二把尺**。
+
+| `chat_style` | 气泡数 | 建议字数 | 分段契约 |
+|---|---|---|---|
+| 0–24 | 1 | 30 | 一次只说一件事，说完即止，不分段 |
+| 25–74（默认 50） | 2 | 60 | 默认一整段；层次确实不同才用空行分两条 |
+| 75–100 | 4 | 90 | 可连发多条：**每条之间用一个空行分隔**，每条独立完整 |
+
+档位另有开场接任务应的长度上限（80 / 150 / 200）。它不写进系统提示，控制台也不能改。
+终局正文没有按字数硬拦。
+
+- 契约句只讲**结构**，不含业务垂直词与角色口癖，框架层人格中性（AGENTS.md §1.9）。
+- 建 session 时经 `processor.build_persona_prompt` 进 **system 稳定前缀**，会话内不改串
+  （§1.7）。改说话强度、建议字数或提示词组后，用这张人格的每一路会话都会重建。
+- 气泡数与 `ai_config.main_channel_visible_limit` 是**两把相乘的闸**，只调一把没反应。
+- ⚠️ 边界对齐 `options=[0, 25, 50, 75, 100]`，**默认 50 必须落在「默认」档**——
+  改分档时别让默认值掉进 terse，否则升级即静默把「最多 2 条」降成 1 条。
+  锁在 `tests/test_send_chat_result_bubbles.py`。
+
+### 工具三层来源（`enabled_tools` 只管中间一层）
+
+| 层 | 内容 | 受 `enabled_tools` 收放 |
+|----|------|----------------------|
+| 常驻直装 | `MAIN_AGENT_CORE_TOOLS`（`send_message_by_ai` / `find_tools` / `create_subagent` …）+ persona `tool_names` | ❌ 框架能力，恒在场 |
+| 向量检索 | L3 语义召回 + `find_tools` 域检索 + `RetrievableToolset` 动态暴露 | ✅ 唯一受管辖的一层 |
+| 能力族静态挂载 | 仅能力代理节点仍可显式声明静态族（`task_basics` 等）；persona 侧已固定 `dynamic`，不再开放配置 | ❌ |
+
+判定口是 `ai_core/agent_node/tool_scope.py` 的 `ToolScope`（一次装配取一次快照，
+装配链路全程只读同一份）。`core` / 空插件名视为框架自身，永远启用；未注册工具放行。
+人格模板 **没有** `tool_packs`：五层自动装配由 `persona_proj.py` 恒定挂 `[DYNAMIC_PACK]`
+（`agent_run/tools.py` 的 `has_dynamic_pack` 恒真）。静态族只出现在能力代理节点。
+控制台选择器是「显式工具白名单」与「按插件」（`GET /api/persona/tools/catalog`）。
+
+> **AgentNode 同构（2026-07-07）**：每个 persona 目录经 `ai_core/agent_node/persona_proj.py`
+> 投影为 `source="persona"` 的只读 AgentNode（与能力代理同一注册表 / 同一 schema），
+> 按 persona.md / config.json 的 mtime 自动刷新；写路径仍是本节的 PersonaConfigManager。
+> 详见 [`docs/AGENT_NODE_UNIFICATION_20260707.md`](../../../../docs/AGENT_NODE_UNIFICATION_20260707.md)。
+
+- **ai_mode**：`提及应答` / `定时巡检` / `命令补充` / `困境救场(暂不可用)`
+- **命令补充**（默认关）：命令回复发出后写入当前会话；`aside_image_probability` /
+  `aside_text_probability` / `aside_mixed_probability` 为 0 到 1 的点评概率；
+  `aside_allow_tools` 控制点评能不能用工具。概率未中也保留回执。见 [§04](./04-event-trigger-flow.md)。
+- **scope**：`disabled`（不启用）/ `global`（全部群聊+私聊）/ `global_group`（仅全部群聊）/
+  `global_private`（仅全部私聊）/ `specific`（仅 `target_groups`）
+
+### Persona 匹配规则（`get_persona_for_session`）
+
+```
+1. 会话级 override（若存在且人格仍在）
+2. 先找 scope="specific" 且 target_groups 含该 group_id / user_id 的 persona
+3. 没有 → 回退：优先 scope="global"；否则群聊用 global_group、私聊用 global_private
+4. 没有 → 返回 None（不触发 AI）
+全局互斥：global / global_group / global_private 只能有一个。
+群聊+私聊都要覆盖时用 global。set_scope 时校验 validate_global_uniqueness。
+```
+
+`PersonaConfigManager` 提供 `set_scope` / `set_target_groups` / `set_ai_mode` /
+`set_inspect_interval` / `set_keywords` / `set_enabled_tools` / `set_tool_names` 等方法，
+全部即时持久化。
+
+### `persona.json`（`persona/settings.py`）
+
+与 `config.json` 分开：这里只放「这个人格怎么叫主人、失败时说什么」。模板
+`DEFAULT_PERSONA_SETTINGS` 是 `Dict[str, GSC]`，WebConsole
+`GET/PUT /api/persona/{name}/settings` 按插件配置同构返回（title/desc/type/value），
+前端 `/persona-config` 的【人格设定】页签三列自适应渲染，加项不用改前端。
+
+运行时用 `get_persona_setting(persona_name, key)` / `get_master_title`；人格不存在或值为空时回退模板默认。`SYSTEM_CONSTRAINTS` 里 `__MASTER_TITLE__` 在 `build_persona_prompt` 时填入。改 `persona.json` 会触达目录 mtime，下一轮会话热重载。
+
+| 键 | 默认 | 用途 |
+|----|------|------|
+| `master_title` | `主人` | 对 `core_config.masters` 的口头称呼 |
+| `error_generic` | `这条消息我处理失败了，稍后再试一次吧` | 执行失败 / 无结果 |
+| `error_timeout` | `刚才网络太慢处理超时了，稍后再试试吧` | 超时 |
+| `error_content_policy` | `这条消息触发了内容安全策略，我没法处理` | 内容安全 |
+
+> **出戏拦截没有罐头文案**（2026-09 起）：`fallback_ooc` / `fallback_machine` 两个键与
+> `output_firewall.fallback_ooc_text` / `fallback_machine_text` 访问器已删除。命中闸门一律
+> 让当前人格自己重说一句（`gs_agent._ooc_recover_persona_voice`，两次机会），两次都不干净时
+> 人格/一致性类**原样发送**、`fund_claim` / `machine_dump` 与模型主动沉默才丢弃；没有 run 的
+> 出口（主动播报 / `send_chat_result` 末端）直接丢弃正文。
+> 剩下的 `error_*` 全是**供应商侧**失败（超时 / 套餐打满 / 内容审核），那不是「角色在说话」。
+> 长任务开场句同理（2026-10）：`task_ack` 键已删除。开场句由模型在委派的同一次回复里写，
+> `create_subagent` 派发成功后代发；没写就由回执允许当前人格补一句（见 07 §「委派开场句」）。
+
+### Persona 配置热重载特殊处理
+
+- 改 `ai_mode` 含"定时巡检" → 调 `start_heartbeat_inspector()` 启动巡检。
+- 改 `inspect_interval` 且已启用巡检 → `inspector.stop_for_persona()` + `start_for_persona()`
+  重启该 persona 的巡检 job（这是唯一不能"下次自然生效"的配置，因为绑了 APScheduler job）。
+
+## 6.7 Persona 进阶模块
+
+| 模块 | 文件 | 作用 |
+|------|------|------|
+| 情绪状态机 | `persona/mood.py` | 角色情绪状态 |
+| 群聊适应性 | `persona/group_context.py` | 按群画像调整口吻 |
+| 自我认知 | `ai_core/self_cognition.py` | `self_model` 演化层（`commitments`/`preferences_learned`/`recurring_topics`/`self_notes`）。**O-3 之后（2026-07）注入拆成两半**：self_model 自述块（bot/scope 级慢变）随 session 固化进 **system_prompt 稳定前缀**（`context_assembly.build_stable_context`，含群画像/词汇映射）；per-user 的关系行由 `build_relationship_context` **每轮注入用户消息侧**（群共享 session，关系随对话者变、不能冻进共享前缀）——每轮动态注入的顺序唯一定义在 `context_assembly.assemble_dynamic_context`（handle_ai 与评测端点共同消费） |
+| 视觉指纹 | `persona/appearance.py` | 启动识图写 `appearance.txt`（摘要进 system，全文只在看图时对照）。`read_image` 对人格目录受信任图做 dHash，命中则钉死「这是你」。不打破惰性；群友口头不入库。 |
+
+> `voice_anchor` 是逐轮口吻锚点（旁路字段），Persona 启动迁移会处理它。
+
+### 6.7.1 稳定前缀红线与 system 不改串（2026-07 起，2026-08 收紧）
+
+慢变上下文（self_model 自述 + 群画像/词汇映射）建 session 时经 `build_persona_prompt` 的
+`extra_stable_context` 固化进 system_prompt（`context_assembly.build_session_system_prompt`）。
+
+**前缀缓存红线（生产约定）**：
+
+1. **`system_prompt` 会话内默认永不改串**：`ai_router._STABLE_PROMPT_TTL = float("inf")`，
+   `_maybe_refresh_stable_prompt` 直接 return。需要「系统提醒」时只在 **user 侧
+   `UserPromptPart` 追加**，落盘前由 `_relean_user_turn` / `_is_framework_prompt_content` 剥掉。
+2. **`message_history` 保头**：`compact_session_history` 裁中段，禁止砍头、禁止锚点插头。
+   发言文本仍在 `HistoryManager`（最近 12 小时）。`read_chat_history` 用 query 或 at 取片段，不一次倒出；别人的私聊只有主人能读。
+3. **动态内容进 user**：mood / 关系 / 记忆 / 当前说话人偏好 / 精确时间 / 身份锚只进每轮 user 装配。`preferences_learned` 与 `AIMemPreference` 不进 system：群会话前缀整群共享，按人换系统提示会打掉缓存。偏好拼在本轮 user 尾，按说话人取，不靠问句词面命中。
+4. **persona 文件 mtime 变化** 仍会整会话重建（显式热重载，非每轮改 system）。
+
+历史曾用有限 TTL 原地刷新 system（O-3）；现行默认 **inf = 最大化 cache**。若显式改回有限
+TTL，须接受画像刷新会改串打掉前缀。
+
+- 改这条链路时别把 per-user 数据塞进稳定前缀——群聊 session 整群共享。
+- **mood 不进 session system prompt**（每轮 user 侧注入）。
+- 这些 user 侧句子的正文只在 `control/lines.py` 写一次，见 §6.7.3。
+
+### 6.7.2 历史渲染的两条新语义（`history_format.py`，2026-07-12 起）
+
+- `at_list` 渲染为「@了用户: id(昵称)（@的是这位用户，不是你）」——前提是入库层
+  （`handler.msg_process`）已把 @Bot 转成 `is_tome`、不进 at_list（该比较已做 str 归一化，
+  改适配器时保持 at 段 data 可 str 化）。
+- 同一用户在合并窗口（`ai_config.history_merge_window`，默认 120s）内的连发合并为一个
+  发言块；窗口**锚定组内首条**而非相邻两条——链式相邻比较会让长独白无限合并成只有首条
+  时间戳的巨块，heartbeat 的时效判断（"你刚刚才说过话"）会被带偏。改合并逻辑时保持
+  "块跨度有上限"这个不变式。
+
+### 6.7.3 当轮控制句只定义一次（`control/lines.py`）
+
+仍插进**当前 request 的 user 侧**、落盘前由 `_relean` 剥掉的句子，正文只写在
+`gsuid_core/ai_core/control/lines.py`。调用处 `import` 这个名字。
+`prepare.py` 用 `is` 认出 `DRIFT_REMINDER`：必须是同一个对象，再赋一份相同的字符串会对不上。
+闸门打回的开头收在 `GATE_NUDGE_MARKERS`；`--- 消息 ---` 用 `MSG_SECTION_MARK` / `MSG_SECTION_HEAD`。
+要填运行时槽位的写成同文件函数（能力节点命中、主人称呼、重复句、别名、引用对象、归属、看板交付回灌）。
+
+`lines.py` 不 import `agent_run` / `utils` / `output_gate` / `interaction_scaffold`，避免环。
+
+留在原处，调用处也不再抄一份：
+
+| 内容 | 留在 |
+|------|------|
+| 提示词组默认正文（跟进、记忆问答、寻址说明） | `interaction_scaffold.py`；目录在 `prompt_group/catalog.py` |
+| 绑在义务上的观察 | `control/corrections.py`（和 `Obligation` 放一起） |
+| 旧历史里的假完成 / 零工具，当前不再插入 | `agent_run/support.py` |
+| 三句旧打回，当前不再插入 | `agent_run/speech_policy.py` |
+| `<control>` 信封 | `control/directive.py` |
+| 子 Agent / 评测器 / 识图的 system 提示 | 各自的渲染处 |
+
+用户能改的是提示词组。控制句什么时候插入由代码决定，不做成提示词组字段，也不做成插件配置。
+这些句子仍走 §6.7.1：不进 `system_prompt`。红线见 [`AGENTS.md` §1.11](../../../../AGENTS.md)。

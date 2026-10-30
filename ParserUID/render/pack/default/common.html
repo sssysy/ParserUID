@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{width:100%;background:#f8fafc;color:#1e293b;font-family:"MiSans","PingFang SC","Microsoft YaHei",sans-serif}
+        .card{position:relative;display:flex;flex-direction:column;width:620px;border-radius:18px;background:radial-gradient(circle at 85% 4%,rgba(251,113,133,.18),transparent 28%),radial-gradient(circle at 4% 44%,rgba(96,165,250,.15),transparent 30%),linear-gradient(150deg,#fff8fb 0%,#f8fafc 45%,#eef6ff 100%)}
+        .header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:40px 32px 12px}
+        .author{display:flex;align-items:center;gap:12px;min-width:0;flex:1}
+        .avatar{width:48px;height:48px;flex:0 0 48px;display:block;border-radius:24px}
+        .author-main{min-width:0}
+        .author-name{font-size:20px;line-height:1.15;font-weight:700;color:#1e293b;white-space:nowrap}
+        .author-meta{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;line-height:1.2;color:#64748b;white-space:nowrap}
+        .brand{display:flex;align-items:center;gap:7px;flex:0 0 auto;padding:8px 0}
+        .brand img{width:17px;height:17px;display:block;border-radius:3px}
+        .brand span{font-size:12px;font-weight:700;color:#64748b;letter-spacing:.12em}
+        .body{padding:4px 32px 0}
+        .title{font-size:24px;line-height:1.28;font-weight:700;color:#1f2937}
+        .copy{margin-top:12px;font-size:14px;line-height:1.72;color:#475569;white-space:pre-wrap}
+        .block-text{margin-top:14px;font-size:14px;line-height:1.72;color:#475569;white-space:pre-wrap}
+        .single-image{width:100%;margin-top:18px;overflow:hidden;background:#f8fafc;border-radius:12px}
+        .single-image img{display:block;width:100%;height:auto;object-fit:contain}
+        .grid{display:grid;width:100%;margin-top:18px;gap:2px;border-radius:12px;overflow:hidden}
+        .grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+        .grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+        .grid-cell{position:relative;height:206px;overflow:hidden}
+        .grid-cell img{display:block;width:100%;height:100%;object-fit:cover}
+        .grid-cell.more span{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:rgba(10,14,24,.58);color:#fff;font-size:26px;font-weight:700}
+        .repost{margin:26px 32px 0;padding:16px 18px;border-left:3px solid #cbd5e1;border-radius:0 12px 12px 0;background:rgba(255,255,255,.55)}
+        .repost-head{display:flex;align-items:center;gap:10px}
+        .repost-avatar{width:34px;height:34px;display:block;border-radius:17px}
+        .repost-name{font-size:14px;font-weight:700;color:#334155}
+        .repost-time{margin-top:3px;font-size:11px;color:#94a3b8}
+        .repost-title{margin-top:12px;font-size:18px;line-height:1.35;font-weight:700;color:#334155}
+        .repost-copy{margin-top:7px;font-size:13px;line-height:1.65;color:#64748b;white-space:pre-wrap}
+        .metrics{display:flex;gap:34px;padding:22px 32px 18px}
+        .stat{min-width:86px}
+        .stat-label{display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b;font-weight:600}
+        .stat-label img{width:13px;height:13px;display:block}
+        .stat-value{margin-top:5px;font-size:20px;line-height:1;font-weight:700;color:#334155}
+        .comments{margin:0 32px;padding-top:22px;border-top:1px solid #e2e8f0}
+        .comments-title{font-size:18px;line-height:1.2;font-weight:700;color:#64748b}
+        .comment{display:flex;gap:11px;margin-top:18px}
+        .comment-avatar{width:38px;height:38px;flex:0 0 38px;display:block;border-radius:19px;background:#e2e8f0}
+        .comment-main{min-width:0;flex:1}
+        .comment-head{font-size:14px;font-weight:700;color:#475569}
+        .reply-to{color:#94a3b8;font-weight:400}
+        .comment-copy{margin-top:5px;font-size:14px;line-height:1.65;color:#334155;white-space:pre-wrap}
+        .comment-meta{display:flex;gap:14px;margin-top:7px;font-size:11px;color:#94a3b8}
+        .comment-meta span{display:flex;align-items:center;gap:4px}
+        .comment-meta img{width:12px;height:12px;display:block;opacity:.8}
+        .replies{margin-top:12px;padding:12px 14px;border-radius:12px;background:rgba(241,245,249,.8)}
+        .reply-comment{margin-top:0;gap:10px}
+        .reply-comment .comment-avatar{width:26px;height:26px;flex:0 0 26px}
+        .reply-comment .comment-head{font-size:12px}
+        .reply-comment .comment-copy{font-size:12px;line-height:1.55}
+        .extra{margin:20px 32px 0;font-size:12px;line-height:1.6;color:#94a3b8}
+        .profile{display:flex;align-items:center;gap:12px;margin:24px 32px 0;padding:20px 0 4px;border-top:1px solid #e2e8f0}
+        .profile-avatar{width:44px;height:44px;display:block;border-radius:22px}
+        .profile-name{font-size:18px;font-weight:700;color:#334155}
+        .profile-note{margin-top:4px;font-size:12px;color:#94a3b8}
+        .footer{display:flex;justify-content:center;align-items:center;margin-top:12px;padding:0 32px 12px;font-size:10px;font-weight:500;letter-spacing:.04em;color:#94a3b8;text-align:center}
+    </style>
+</head>
+{% from "macros.html" import render_avatar, render_metrics, render_comments, render_body, render_hero, render_repost %}
+<body>
+<main class="card">
+    <div class="header">
+        <div class="author">
+            {{ render_avatar(card.author_avatar_uri) }}
+            <div class="author-main">
+                <div class="author-name">{{ card.author_name }}</div>
+                <div class="author-meta">
+                    {% for item in card.common_meta %}<span>{{ item }}</span>{% endfor %}
+                </div>
+            </div>
+        </div>
+        <div class="brand">
+            {% if card.platform_logo_uri %}<img src="{{ card.platform_logo_uri }}" alt="">{% endif %}
+            <span>{{ card.platform_display_name }}</span>
+        </div>
+    </div>
+    <div class="body">
+        <div class="title">{{ card.title }}</div>
+        {% if card.text %}<div class="copy">{{ card.text }}</div>{% endif %}
+        {{ render_hero(card) }}
+        {{ render_body(card.blocks) }}
+    </div>
+    {{ render_repost(card.repost) }}
+    <div class="metrics">{{ render_metrics(card.metrics) }}</div>
+    {{ render_comments(card.comments) }}
+    {% if card.extra_info %}<div class="extra">{{ card.extra_info }}</div>{% endif %}
+    <div class="profile">
+        {% if card.author_avatar_uri %}<img class="profile-avatar" src="{{ card.author_avatar_uri }}" alt="">{% endif %}
+        <div>
+            <div class="profile-name">{{ card.author_name }}</div>
+            <div class="profile-note">{{ card.profile_note }}</div>
+        </div>
+    </div>
+    <div class="footer">{{ card.footer }}</div>
+</main>
+</body>
+</html>

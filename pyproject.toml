@@ -1,0 +1,14 @@
+[project]
+name = "ParserUID"
+version = "0.1.0"
+description = "多平台聚合解析插件"
+authors = [
+    {name = "sssysy", email = "sssysy@vip.qq.com"},
+]
+requires-python = ">=3.12"
+readme = "README.md"
+license = {file = "LICENSE"}
+
+
+[tool.pdm]
+distribution = false

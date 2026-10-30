@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "pixiv",
+  "display_name": "Pixiv",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "default": false
+    },
+    "cookie": {
+      "type": "text",
+      "label": "Cookie",
+      "hint": "可选；Pixiv API 可选填写网页 Cookie",
+      "secret": true,
+      "default": ""
+    },
+    "nsfw": {
+      "type": "select",
+      "label": "R18 内容处理方式",
+      "options": [
+        "send",
+        "blur",
+        "ignore"
+      ],
+      "default": "send"
+    },
+    "max_page": {
+      "type": "int",
+      "label": "漫画最大页数",
+      "hint": "超过限制时只发送封面，0 为不限制",
+      "default": 30
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "douyin",
+  "display_name": "抖音",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "default": false
+    },
+    "cookie": {
+      "type": "text",
+      "label": "Cookie",
+      "hint": "选填，用于获取高画质与免验证内容",
+      "secret": true,
+      "default": ""
+    },
+    "video_quality": {
+      "type": "select",
+      "label": "视频画质偏好",
+      "options": ["auto", "1080p", "720p", "540p"],
+      "default": "auto"
+    },
+    "include_comments": {
+      "type": "bool",
+      "label": "卡片显示评论",
+      "default": false
+    },
+    "comment_limit": {
+      "type": "int",
+      "label": "评论数量",
+      "default": 5
+    }
+  }
+}

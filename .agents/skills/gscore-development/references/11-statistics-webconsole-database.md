@@ -1,0 +1,222 @@
+# 十一、统计 / 网页控制台 / 数据库 / 帮助系统
+
+> **返回主入口**：[`../SKILL.md`](../SKILL.md) · **上一章**：[十、RAG 知识库与嵌入](./10-rag-knowledge-embedding.md) · **下一章**：[十二、已知坑与开发注意事项](./12-developer-pitfalls.md)
+
+本章集中讲四块支撑系统：AI 统计、网页控制台（含认证加密）、数据库基类（含 AI 表与总开关）、
+帮助系统。它们是改框架时频繁打交道、又容易踩约定的地方。
+
+## 11.1 AI Statistics 统计系统（`ai_core/statistics/`）
+
+收集/聚合/持久化 AI 各类统计，喂前端面板。
+
+```
+statistics/
+├── manager.py           # StatisticsManager 单例
+├── models.py            # 7 个数据库表
+├── dataclass_models.py  # 内存数据结构（BotState / LatencyStats / TokenUsage）
+└── startup.py           # @on_core_start / @on_core_shutdown / 零点重置
+```
+
+**统计维度**：Token 消耗（分模型/分类型）、Session 内存占用、活跃度（Persona 排行/触发方式占比/
+群组用户活跃榜）、性能质量（P95 延迟/环节耗时/意图分布/失败率错误码）、Heartbeat 专项、RAG 命中率、
+**记忆系统 7 项**（observations/ingestions/ingestion_errors/retrievals/entities/edges/episodes）。
+
+**数据库表**（均 `BaseIDModel`，全局统计无 bot_id）：`AIDailyStatistics`（含 memory_* 字段）、
+`AITokenUsageByModel`、`AITokenUsageByType`、`AIHeartbeatMetrics`、`AIGroupUserActivityStats`、
+`AIRAGMissStatistics`、`AIRAGDocumentStatistics`。
+
+**持久化机制**：
+
+```python
+@on_core_start  async def init_ai_core_statistics():      # 启动：起空闲清理 + 巡检（查总开关）+ 回灌今日
+@on_core_shutdown async def shutdown_ai_core_statistics(): # 关闭：持久化到 DB
+@scheduler.scheduled_job("cron", hour=0, minute=0)  _scheduled_ai_core_reset   # 零点：落盘 + 重置计数器
+@scheduler.scheduled_job("cron", minute="*/30")     _persist_loop              # 每 30 分钟持久化
+```
+
+用法：直接用全局单例 `statistics_manager`，`record_token_usage(model_name, chat_type, ...)` /
+`record_latency` / `record_intent` / `record_trigger` / `record_memory_*` / `get_summary()`。
+
+**Token 数值来源与流式 usage 语义（2026-07-04）**：统计/预算的 token 数全部来自
+`gs_agent.py::_execute_run` 末尾的 `result.usage()`，其正确性取决于 pydantic_ai 对流式
+chunk usage 的累计方式。vLLM/SGLang 系网关（如 SiliconFlow）**每个 chunk 都带累计 usage**，
+默认逐 chunk 累加会令统计膨胀约 chunk 数倍（output 近似平方级）。已由 OpenAI 配置项
+`usage_stats_mode`（auto/incremental/cumulative）+ auto 模式在线探测修复，详见
+[§12.17 流式 usage 累计语义膨胀](./12-developer-pitfalls.md)。
+
+前端 API：`GET /api/ai/statistics/*`（summary / token-by-model / token-by-range / persona-leaderboard /
+active-users / trigger-distribution / intent-distribution / errors / heartbeat / rag / history）。
+其中 `token-by-range?start_date&end_date` 对闭区间逐日聚合 Token（今日取内存、历史取 DB、缺日补 0），
+一次返回 total / daily 趋势 / by_model 分布，供时间段维度看板使用。
+
+## 11.2 网页控制台（`gsuid_core/webconsole/`）
+
+Hub 静态资源由 `webconsole/static_serve.py::build_frontend_router` 挂在 `/app/`：
+
+- 带 hash 的 `assets/**`：`Cache-Control: public, max-age=31536000, immutable`
+- `index.html` / `version.json`：`no-cache`（禁止长期缓存 HTML，否则升级后会请求已删除的旧 hash）
+- 若存在 `.br` / `.gz` 且 `Accept-Encoding` 允许，按 Brotli 优先返回并设 `Content-Encoding` + `Vary: Accept-Encoding`
+- 缺失的 js/css/图片 **404**，不要 SPA 回落成 `index.html`（否则浏览器把 HTML 当 JS 解析）
+- `GZipMiddleware`（`app_life.py`）给未预压的文本响应做动态 gzip；已有 `Content-Encoding` 的预压文件不会再压
+- 跨域：`web_cors_middleware.py` 读核心配置 `web_cors_origins`（默认空）。只有名单里的 Origin 才回显 `Access-Control-Allow-Origin`（不用 `*`）并带 `Access-Control-Allow-Credentials: true`，同时应答带 `Access-Control-Request-Method` 的 OPTIONS 预检。控制台用自定义 API Host 指向另一台 Core 时要填**页面源**（如 `http://localhost:8080`），不是 API 地址。同源 `/app/` 和开发代理不需要这项。保存后下一次请求生效。
+
+前端构建（gsuid_hub `precompressDist`）负责写出 `.gz` / `.br`。只改 Vite 插件、不改本文件的协商逻辑，浏览器看不到压缩。
+
+FastAPI 路由，全部走鉴权依赖：
+
+```python
+from fastapi import APIRouter, Depends
+from gsuid_core.webconsole.auth_api import require_auth
+app = APIRouter()
+@app.get("/api/example")
+async def example(_user: Dict = Depends(require_auth)): ...
+```
+
+主要业务 API 文件：`persona_api.py`、`mcp_config_api.py`、`embedding_config_api.py`、
+`ai_scheduled_task_api.py`、`knowledge_base_api.py`、`ai_skills_api.py`、`agent_debug_api.py`
+（C10 可视化调试台：记忆图谱浏览/软删 Edge、Kanban 看板/步骤改写、self_model 查看修正）、
+`budget_api.py`（按 Session 的 Token 预算限制，见下）。
+
+### AI 预算限制子系统（`ai_core/budget/`）
+
+按 Session（`global`/`group`/`member`/`user` 四维度，与 Session ID 语义对齐：群聊全群共享、
+私聊按人）对 Token 设 **5h/天/周** 三档上限，支持白名单 + 主人豁免。三张表
+（`AIBudgetRule`/`AIBudgetWhitelist`/`AIBudgetUsageRecord`，受总开关控制建表，已登记进
+`AI_DATABASE_MODEL_MODULES`）。判定/记账走 `budget/manager.py::budget_manager`：
+拦截在 `handle_ai.py::handle_ai_chat` 调 LLM **前**（`check`），记账在
+`gs_agent.py::_execute_run` 记 Token **后**（`record_usage`，仅带 `ev` 的交互式 run）。
+全局策略在 `budget/config.py`（`budget_config.json`）。前端 API 见
+`webconsole/budget_api.py`（`/api/ai/budget/*`）与 `webconsole/docs/41-ai-budget.md`。
+
+> 预算记账与统计共享同一 usage 来源（`result.usage()`），自身不解析流式 usage，
+> 流式语义修复（§12.17）自动惠及预算。注意内存账本回载近 8 天
+> `AIBudgetUsageRecord`：修复前被膨胀的历史流水在滚动窗口内仍参与限额，
+> 必要时手工清理该表让用户额度立即恢复正常。
+
+> 插件也可复用 `gsuid_core.webconsole.app_app.app` 挂自己的 `/api/<插件名>/...` 路由 +
+> `Depends(require_auth)`。前端页用 `register_plugin_page`（`webconsole/plugin_page.py`），
+> 静态资源 `/plugin-pages/<plugin_id>/<page_id>/`，列表字段 `pages`。
+> 详见 `gscore-plugin-development` §19 / §22。
+
+### 评测端点 `/api/chat_with_history`（本地测试专用，默认 404）
+
+`chat_with_history_api.py`，受 `_local_test_gate` 控制。记忆评测与 agent 评测共用，
+2026-07-12 起的关键语义：
+
+- `max_history`（默认 0）：0 = 记忆评测原行为（history 只走 observe→记忆检索，不进模型
+  上下文）；agent 评测传正值（runner 默认 30）让注入的 history 真正喂进上下文。
+- `persona_name`：存在则用真实人设 system_prompt；**不存在时回退通用助手 + warning**，
+  不再 `FileNotFoundError` → -102（一个拼写错误曾让整批评测像 core 挂了）。
+- 输入侧防线与生产对齐：当前消息与 history 的 user 轮都过 `annotate_untrusted_message`
+  （受 `content_guard_enable` 控）。**注意作用点**：标注只喂给 Agent（`agent_message`），
+  raw `message` 保留给记忆检索 query / event——别把标注后的文本回灌进检索。
+- **装配已与生产同源（§5.3 落地，2026-07-12 第四轮）**：system prompt 走
+  `context_assembly.build_session_system_prompt`（persona + 稳定前缀；无群故无群画像块），
+  每轮动态注入（情绪/关系行/口吻锚点/自我情景/长任务/长期记忆）走
+  `assemble_dynamic_context`——与 handle_ai 消费同一函数，顺序契约由
+  `tests/test_context_assembly.py` 源码级+功能级双锁防再漂移。改 handle_ai 装配段
+  必须改 `context_assembly`，不许在入口手工拼接。
+
+### 配置/巡检的热重载特殊处理
+
+`PUT /api/persona/{name}/config` 更新配置时：改 `ai_mode` 含"定时巡检"→ `start_heartbeat_inspector()`；
+改 `inspect_interval` 且已启用巡检 → `inspector.stop_for_persona()` + `start_for_persona()`。其余
+配置 `set_config` 写盘后下次自然生效。
+
+## 11.3 网页控制台认证报文加密（2026-06-15，**强制、无开关**）
+
+`webconsole/auth_crypto.py` 提供 **X25519 ECDH + HKDF-SHA256 + AES-256-GCM** 应用层混合加密：
+
+- `GET /api/auth/pubkey` 下发服务端公钥 + `key_id`；登录/注册/改密接口经 `_decrypt_auth_body()`
+  统一解密后再走业务。
+- **强制、无明文兼容**：所有认证报文必须加密（`enc=true` + 握手字段），明文/`enc!=true` 一律
+  被 `AuthCryptoError` 拒绝。**不再有** `REQUIRE_ENCRYPTED_AUTH` 配置。
+- **目标**：纯 HTTP 部署（无 HTTPS）下消除"密码明文上链路"的被动嗅探。具前向保密（每次握手用
+  前端临时密钥对）+ 防重放（`ts` 时间戳 120s 窗口）。**不防主动 MITM 篡改前端 bundle**（敌意
+  网络仍需 HTTPS）。
+- **两道纵深防护**：① 解密层 IP 限流（解密前先 check IP 限流窗口，失败 `record_failure` 计入该
+  IP，连续异常封禁——封堵畸形报文 DoS/探测）；② 业务层限流（解密后仍跑 `login:`/`register:`/
+  `password:` 限流）。
+- **密钥轮换**：`register_key_rotation_job()` 把 `AuthKeyStore.rotate()` 接入 APScheduler，默认
+  每 `KEY_ROTATION_INTERVAL_HOURS=12` 小时轮换，旧密钥保留一代以容忍轮换瞬间在途请求。
+
+> ⚠️ **前端必须实现加密协议**：部署/升级时须确保前端 bundle 已落地加密实现（先取
+> `/api/auth/pubkey` 再提交加密报文），否则登录/注册/改密一律被拒。`auth_keystore` 是单进程
+> 密钥，多实例不共享。
+
+## 11.4 数据库基类与 AI 表（`utils/database/base_models.py`）
+
+GsCore 用 **SQLModel** 作 ORM。继承体系：
+
+```
+BaseIDModel              # 最基础，只有 id
+  └── BaseBotIDModel     # + bot_id
+        └── BaseModel    # + bot_id + user_id
+```
+
+**铁律**（与 `AGENTS.md` §3 一致）：
+
+1. **不写 `__tablename__`**：表名 = 类名全小写无下划线（`AiMemeRecord` → `aimemerecord`）。
+   自定义约束/索引用 `__table_args__`。
+2. **数据库方法写在模型类里**，用 `@with_session`（写 / 混合）或 `@with_read_session`（纯 SELECT；
+   SQLite 走独立读槽）。自动建 session / 提交 / 异常回滚 / 归还连接池。
+   签名第二参必须是 `session: AsyncSession`（紧跟 cls/self）。插件侧完整说明见
+   [gscore-plugin-development §5.3](../../gscore-plugin-development/references/05-database.md#53-with_session--with_read_session)。
+3. 复杂场景手动管理用 `async_maker()`。
+4. 全异步；CPU 密集用 `to_thread`。
+
+```python
+class CoreUser(BaseBotIDModel, table=True):
+    @classmethod
+    @with_read_session
+    async def get_user_by_name(cls, session: AsyncSession, name: str) -> "CoreUser | None":
+        stmt = select(cls).where(cls.name == name)
+        return (await session.execute(stmt)).scalar_one_or_none()
+```
+
+SQLite 写走一把进程内闸门（`sqlite_write_gate`，与记忆的 `db_write_guard` 是同一把）。
+`gsuid_core.*` 的写在排队时排在插件前面。纯 SELECT（`select_rows` / `get_all_data` 等）
+走 `@with_read_session`：读连接 `query_only`，不进这把闸门。`journal_mode=WAL` 只在启动时
+设一次；每条连接先设 `busy_timeout`（5 秒）。`batch_insert_data_with_update` 按 400 行提交。
+
+`@with_session` 在 SQLite 上从拿到闸门起最多 10 秒（`_WRITE_BUDGET_S`）。超时取消该协程、
+`close()` 最多再等 2 秒（`_CLOSE_DEADLINE_S`）后必须放开闸门、打 `log.database.write_timeout`，并抛
+`DatabaseWriteTimeout`，不进入锁竞争重试。排队超过 20 秒（`GATE_WAIT_S`）抛 `WriteGateTimeout`，
+并取消占锁任务，等它退出后再交接，避免两个人同时写。WebSocket 读循环不 `await handle_event`，入站处理有独立预算，一条卡住不会停读。断线会等这条入站处理结束。
+MySQL / PostgreSQL 不套这道预算。收尾宽限内协程若已正常返回，调用方拿到
+该返回值，不报超时。同一任务里的嵌套写复用外层连接，包一层 savepoint：失败只回滚这一层并重试
+锁错误，外层 `commit` 不会把失败语句之前的半截写入一起提交。`create_task` 出去的子任务另开连接。
+检索用的纯 SELECT（偏好、边、实体名、日统计、`CoreUser.get_all_user` / `CoreGroup.get_all_group`）
+走读会话。每条消息的 `insert_user` / 主人订阅在后台写，不在收发循环里等待；画像未变时 `insert_user` 仍只读、不进写闸门。`DeliveryLedger.check_and_claim` 的插入、
+过期 state 删除、知识库分片写入走同一把闸门。插件里直接 `async_maker()` 的写仍不进闸门。
+
+**AI 表与总开关的关系（重要）**：`create_core_tables`（`on_core_start_before`，见 [§02](./02-startup-lifecycle.md)）
+在 **AI 总开关关闭时跳过创建所有 AI 表**。所以关 AI 时 SQLite 不会出现任何 AI 相关表，省体积。
+加 AI 表时记得挂到这条受总开关控制的建表路径，而非无条件建。
+
+**Schema 升级（给已部署用户补列/加索引）**：走 `on_core_start_before` 的 `trans_adapter`（框架）
+或插件的 `exec_list`，**执行 ALTER / CREATE INDEX**。绝不能在运行期临时 ALTER。
+
+## 11.5 帮助系统
+
+帮助系统让插件把命令登记成可视化帮助图/状态面板。给框架开发者的要点：
+
+- `register_help(plugin_name, help_data)` / `get_new_help(...)`：登记并生成帮助图。
+- `register_status(...)`：登记状态面板项。
+- 详细用法（给插件作者）见 `gscore-plugin-development` 的帮助系统章
+  （`references/08-help-system.md`）。
+
+> 框架侧改帮助系统时注意：帮助数据是插件在模块加载期登记的（与触发器同期，见 [§03](./03-plugin-loading-and-config.md)
+> 的 `cached_import`），渲染走图片渲染范式（PIL → pytakumi → playwright）。
+
+## 11.6 AI 会话日志：逻辑会话链（chain）分段 + `history_reset`（2026-07-08 重构）
+
+`ai_core/session_logger.py`（唯一会话日志序列化器）+ `webconsole/ai_session_logs_api.py`（`/api/ai/session_logs`）。**物理文件 ≠ 逻辑会话**：
+
+- **物理分段**：单文件仍按 `MAX_ENTRIES_PER_FILE`（500 → **2000**）滚动，纯为限单文件体积/活跃会话内存。
+- **逻辑会话链**：同一会话窗口内滚动出的多分段共享稳定 `chain_id`（`segment_index` 递增、`prev_segment` 指上一段），写在文件头（`entries` 之前，保持头部快速读取契约）。**滚动不再 seed 复制上下文**——连续性由 chain 归并承载。
+- **API 归并**：`_build_unified_list` 先合并「单分段」（内存覆盖磁盘同 uuid + is_active 修正），再**按 `chain_id` 归并成一张卡片**（条数/类型计数求和、linked_agents 跨段去重、身份取最新段），卡片附有序 `segments[]`；详情仍以**单分段**为粒度，前端按 `segments` 懒加载拼接。**旧文件无 chain_id → 回退 `session_uuid`（各自一张卡片），无需迁移**。
+- **`history_reset` entry**（`data.reason` 区分子类型，前端画不同色块）：`user_clear`（`/clear`、`清空会话`）、`persona_switch`（`人格切换`，带 `persona_name`）、`auto_compact`（`gs_agent.extract_history` 超长自动裁剪，带 `before`/`after`）。它是**时间线内**重置标记，**不**触发新分段。接线点：`core_command/core_ai_control`（前两者，在 `remove_ai_session` **之前**打标）、`gs_agent.extract_history`（后者，仅真正裁剪时打）。
+- **红线**：改文件头字段务必保持 `entries` 在最后；新增 entry 类型必须登记进 `SESSION_ENTRY_TYPES`。
+
+> 详见 `webconsole/docs/23-ai-session-logs.md`（API 契约）与 `docs/AI_SESSION_LOG_CHAIN_AND_WATERFALL_20260708.md`（交接文档）。前端瀑布见 gsuid_hub `gshub-development` §8.7。

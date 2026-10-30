@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "name": "bilibili",
+  "display_name": "哔哩哔哩",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "default": false
+    },
+    "cookies": {
+      "type": "text",
+      "label": "Cookies",
+      "hint": "选填；支持 SESSDATA、bili_jct、DedeUserID 等网页 Cookie",
+      "secret": true,
+      "default": ""
+    },
+    "video_quality": {
+      "type": "select",
+      "label": "视频画质偏好",
+      "hint": "auto 自动选择最高可用画质",
+      "options": [
+        "auto",
+        "8k",
+        "4k",
+        "1080p60",
+        "1080p+",
+        "1080p",
+        "720p",
+        "480p",
+        "360p"
+      ],
+      "default": "auto"
+    },
+    "video_codec": {
+      "type": "select",
+      "label": "视频编码偏好",
+      "options": [
+        "auto",
+        "avc",
+        "hev",
+        "av1"
+      ],
+      "default": "auto"
+    },
+    "danmaku": {
+      "type": "bool",
+      "label": "卡片显示弹幕",
+      "default": true
+    },
+    "include_comments": {
+      "type": "bool",
+      "label": "卡片显示评论",
+      "hint": "获取视频热门根评论、置顶评论及一级回复",
+      "default": false
+    },
+    "comment_limit": {
+      "type": "int",
+      "label": "评论数量",
+      "hint": "单个视频最多获取的根评论数量，范围 0-20；关闭评论时无需请求",
+      "default": 5
+    }
+  }
+}

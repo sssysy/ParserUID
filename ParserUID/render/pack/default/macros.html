@@ -1,0 +1,124 @@
+{% macro render_avatar(src, class_name="avatar") -%}
+    {% if src %}
+        <img class="{{ class_name }}" src="{{ src }}" alt="">
+    {% else %}
+        <div class="{{ class_name }}"></div>
+    {% endif %}
+{%- endmacro %}
+
+{% macro render_metric_icon(icon_uri) -%}
+    {% if icon_uri %}<img src="{{ icon_uri }}" alt="">{% endif %}
+{%- endmacro %}
+
+{% macro render_metrics(metrics) -%}
+    {% for item in metrics %}
+        <div class="stat">
+            <div class="stat-label">{{ render_metric_icon(item.icon_uri) }}<span>{{ item.label }}</span></div>
+            <div class="stat-value">{{ item.value }}</div>
+        </div>
+    {% endfor %}
+{%- endmacro %}
+
+{% macro render_signals(metrics) -%}
+    {% for item in metrics %}
+        <div class="signal">
+            <div class="signal-head">{{ render_metric_icon(item.icon_uri) }}<span>{{ item.label }}</span></div>
+            <div class="signal-value">{{ item.value }}</div>
+        </div>
+    {% endfor %}
+{%- endmacro %}
+
+{% macro render_comment(comment) -%}
+    <article class="comment">
+        {{ render_avatar(comment.avatar_uri, "comment-avatar") }}
+        <div class="comment-main">
+            <div class="comment-head">{{ comment.author_name }}</div>
+            <div class="comment-copy">{{ comment.text }}</div>
+            {% if comment.timestamp or comment.location or comment.like_count or comment.reply_count %}
+                <div class="comment-meta">
+                    {% if comment.timestamp %}<span>{{ comment.timestamp }}</span>{% endif %}
+                    {% if comment.location %}<span>{{ comment.location }}</span>{% endif %}
+                    {% if comment.like_count %}
+                        <span>{{ render_metric_icon(comment.like_icon_uri) }}{{ comment.like_count }}</span>
+                    {% endif %}
+                    {% if comment.reply_count %}
+                        <span>{{ render_metric_icon(comment.reply_icon_uri) }}{{ comment.reply_count }}</span>
+                    {% endif %}
+                </div>
+            {% endif %}
+            {% if comment.replies %}
+                <div class="replies">
+                    {% for reply in comment.replies %}
+                        <div class="comment reply-comment">
+                            {{ render_avatar(reply.avatar_uri, "comment-avatar") }}
+                            <div class="comment-main">
+                                <div class="comment-head">
+                                    {{ reply.author_name }}
+                                    {% if reply.parent_author %}<span class="reply-to"> 回复 @{{ reply.parent_author }}</span>{% endif %}
+                                </div>
+                                <div class="comment-copy">{{ reply.text }}</div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+    </article>
+{%- endmacro %}
+
+{% macro render_comments(comments) -%}
+    {% if comments %}
+        <section class="comments">
+            <div class="comments-title">评论</div>
+            {% for comment in comments %}{{ render_comment(comment) }}{% endfor %}
+        </section>
+    {% endif %}
+{%- endmacro %}
+
+{% macro render_image_group(group) -%}
+    {% if group.images|length == 1 %}
+        <div class="single-image"><img src="{{ group.images[0].uri }}" alt=""></div>
+    {% else %}
+        <div class="grid grid-{{ group.columns }}">
+            {% for image in group.images %}
+                {% if loop.last and group.hidden_count %}
+                    <div class="grid-cell more"><img src="{{ image.uri }}" alt=""><span>+{{ group.hidden_count }}</span></div>
+                {% else %}
+                    <div class="grid-cell"><img src="{{ image.uri }}" alt=""></div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    {% endif %}
+{%- endmacro %}
+
+{% macro render_body(blocks) -%}
+    {% for block in blocks %}
+        {% if block.kind == "text" %}
+            <div class="block-text">{{ block.text }}</div>
+        {% else %}
+            {{ render_image_group(block) }}
+        {% endif %}
+    {% endfor %}
+{%- endmacro %}
+
+{% macro render_hero(card) -%}
+    {% if card.show_hero %}
+        <div class="single-image"><img src="{{ card.hero_uri or card.empty_image_placeholder }}" alt=""></div>
+    {% endif %}
+{%- endmacro %}
+
+{% macro render_repost(card) -%}
+    {% if card %}
+        <div class="repost">
+            <div class="repost-head">
+                {% if card.author_avatar_uri %}<img class="repost-avatar" src="{{ card.author_avatar_uri }}" alt="">{% endif %}
+                <div>
+                    <div class="repost-name">{{ card.author_name }}</div>
+                    <div class="repost-time">{{ card.timestamp or "" }}</div>
+                </div>
+            </div>
+            <div class="repost-title">{{ card.title }}</div>
+            <div class="repost-copy">{{ card.text or card.title }}</div>
+        </div>
+    {% endif %}
+{%- endmacro %}

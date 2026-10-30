@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "weibo",
+  "display_name": "微博",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "default": false
+    },
+    "cookie": {
+      "type": "text",
+      "label": "Cookie",
+      "hint": "可选；部分长文、超话视频或高清图可能需要网页 Cookie",
+      "secret": true,
+      "default": ""
+    },
+    "include_comments": {
+      "type": "bool",
+      "label": "卡片显示评论",
+      "hint": "抓取热门评论及一级回复",
+      "default": true
+    },
+    "comment_limit": {
+      "type": "int",
+      "label": "评论数量",
+      "hint": "每条微博最多抓取的评论数，范围 0-20",
+      "default": 5
+    },
+    "include_reposts": {
+      "type": "bool",
+      "label": "卡片显示转发链",
+      "hint": "附带展示原微博内容",
+      "default": true
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "name": "nga",
+  "display_name": "NGA",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "default": false
+    },
+    "cookie": {
+      "type": "text",
+      "label": "Cookie",
+      "hint": "可选；包含 guestJs、ngaPassportUid 等的网页 Cookie",
+      "secret": true,
+      "default": ""
+    },
+    "show_body_text": {
+      "type": "bool",
+      "label": "发送正文文字",
+      "hint": "关闭时聊天框只显示图片和描述卡片",
+      "default": true
+    },
+    "mixed_layout": {
+      "type": "bool",
+      "label": "图文混排",
+      "hint": "按正文顺序交替发送文字和图片",
+      "default": true
+    },
+    "include_floor": {
+      "type": "bool",
+      "label": "支持定位单楼层",
+      "default": true
+    }
+  }
+}
