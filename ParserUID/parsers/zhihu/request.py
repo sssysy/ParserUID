@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import json
 import asyncio
-from typing import TYPE_CHECKING, Final
+from typing import Final
 from urllib.parse import urlparse
 from collections.abc import Mapping, Callable
 
+import httpx
 from bs4 import BeautifulSoup
-
-if TYPE_CHECKING:
-    from curl_cffi.requests import AsyncSession
 
 from gsuid_core.logger import logger
 
@@ -81,41 +79,20 @@ class ZhihuClient:
     def __init__(
         self,
         *,
+        client: httpx.AsyncClient,
         cookie_str: str = "",
         headers: Mapping[str, str],
-        proxy: str | None = None,
-        timeout: int = 30,
         retries: int = 2,
-        impersonate: str = "chrome",
     ) -> None:
+        self.client = client
         self.cookie_str = cookie_str
         self.cookies_dict = parse_cookie_string(cookie_str)
         self.headers = dict(headers)
-        self.proxy = proxy
-        self.timeout = timeout
         self.retries = max(0, retries)
-        self.impersonate = impersonate
-        self._session: AsyncSession | None = None
         self._homepage_ready = False
         self._lock = asyncio.Lock()
 
-    @property
-    def session(self) -> AsyncSession:
-        if self._session is None:
-            self._session = AsyncSession(
-                headers=self.headers,
-                timeout=self.timeout,
-                impersonate=self.impersonate,
-                proxy=self.proxy,
-            )
-            for k, v in self.cookies_dict.items():
-                self._session.cookies.set(k, v, domain=".zhihu.com")
-        return self._session
-
     async def close(self) -> None:
-        if self._session is not None:
-            await self._session.close()
-            self._session = None
         self._homepage_ready = False
 
     @property
@@ -136,6 +113,8 @@ class ZhihuClient:
             "referer": "https://www.zhihu.com/",
             "origin": "https://www.zhihu.com",
         }
+        if self.cookie_str:
+            headers["Cookie"] = self.cookie_str
         if token:
             headers["x-xsrftoken"] = token
         if sign:
@@ -167,7 +146,7 @@ class ZhihuClient:
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
-                response = await self.session.request(
+                response = await self.client.request(
                     method,
                     url,
                     headers=self._request_headers(
@@ -176,11 +155,12 @@ class ZhihuClient:
                         sign=True,
                     ),
                     json=json_body,
-                    allow_redirects=True,
                 )
                 final_url = str(response.url)
                 text = response.text
                 status = int(response.status_code)
+                if response.url.host != "www.zhihu.com":
+                    raise ParseException("知乎请求被重定向到非预期站点")
                 if is_challenge_page(text, status):
                     raise ParseException("知乎请求触发盾验证，请补充 Cookie")
                 if is_login_page(final_url, text):
@@ -215,7 +195,7 @@ class ZhihuClient:
         saw_invalid = False
         for attempt in range(self.retries + 1):
             try:
-                response = await self.session.get(
+                response = await self.client.get(
                     url,
                     headers=self._request_headers(
                         url,
@@ -224,7 +204,6 @@ class ZhihuClient:
                         ),
                         sign=False,
                     ),
-                    allow_redirects=True,
                 )
                 text = response.text
                 status = int(response.status_code)
@@ -267,10 +246,9 @@ class ZhihuClient:
         sign: bool,
         allow_login: bool,
     ) -> str:
-        response = await self.session.get(
+        response = await self.client.get(
             url,
             headers=self._request_headers(url, accept=accept, sign=sign),
-            allow_redirects=True,
         )
         text = response.text
         status = int(response.status_code)

@@ -229,6 +229,22 @@ def extract_first_url(ev: Event, *, include_reply: bool) -> str | None:
     return None
 
 
+def extract_match_source(ev: Event, *, include_reply: bool) -> str | None:
+    """链接优先；没有链接时返回正文或允许的引用正文供关键词匹配。"""
+    found = extract_first_url(ev, include_reply=include_reply)
+    if found is not None:
+        return found
+
+    text = html.unescape(ev.raw_text).strip()
+    if text:
+        return text
+    if include_reply and ev.reply is not None:
+        reply_text = html.unescape(ev.reply).strip()
+        if reply_text:
+            return reply_text
+    return None
+
+
 def normalize_url(url: str) -> str:
     """规范化用于去重的 URL，移除片段与默认端口。"""
     try:
@@ -303,27 +319,25 @@ class ParserRuntime:
             return False
         await self._sync_limits()
         include_reply = bool(parser_config.get_config("parse_replies").data)
-        url = extract_first_url(ev, include_reply=include_reply)
-        if url is None:
+        source = extract_match_source(ev, include_reply=include_reply)
+        if source is None:
             return False
-        matched = self.registry.match(url)
+        matched = self.registry.match(source)
         if matched is None:
             return False
 
-        normalized_url = normalize_url(url)
+        normalized_source = normalize_url(source) if _is_http_url(source) else " ".join(source.split())
         now = self._clock()
-        if not self._message_claims.claim(build_dedup_key(ev, normalized_url), now):
+        if not self._message_claims.claim(build_dedup_key(ev, normalized_source), now):
             return False
         link_claims = _require_claims(self._link_claims)
-        link_key = f"{ev.session_id}\x1f{normalized_url}"
+        link_key = f"{ev.session_id}\x1f{normalized_source}"
         if not link_claims.claim(link_key, now):
             logger.debug(f"[Parser·编排] 链接防抖命中 | parser={matched.keyword}")
             return False
 
-        logger.info(
-            f"[Parser·解析] 链接命中，开始解析 | parser={matched.keyword} | "
-            f"host={urlsplit(normalized_url).hostname or 'unknown'}"
-        )
+        host = urlsplit(normalized_source).hostname if _is_http_url(normalized_source) else "text"
+        logger.info(f"[Parser·解析] 链接命中，开始解析 | parser={matched.keyword} | host={host or 'unknown'}")
         task = asyncio.create_task(
             self._run_selected(bot, ev, matched),
             name=f"ParserUID:{matched.keyword}",

@@ -135,16 +135,21 @@ class ZhihuParser(BaseParser):
 
     @property
     def client(self) -> ZhihuClient:
-        proxy = self.proxy
-        if self._client_instance is None or self._client_instance.proxy != proxy:
+        if self._client_instance is None:
+            client = self._client
+            if client is None:
+                raise RuntimeError("知乎 HTTP 会话尚未初始化")
             self._client_instance = ZhihuClient(
+                client=client,
                 cookie_str=self.get_config_value("cookie"),
                 headers=_ZHIHU_HEADERS,
-                proxy=proxy,
-                timeout=30,
                 retries=2,
             )
         return self._client_instance
+
+    async def _get_client(self) -> ZhihuClient:
+        await self.get_client()
+        return self.client
 
     async def close(self) -> None:
         if self._client_instance is not None:
@@ -326,7 +331,7 @@ class ZhihuParser(BaseParser):
 
     async def parse_pin(self, pin_id: str) -> Sequence[ContentItem]:
         url = f"https://www.zhihu.com/pin/{pin_id}"
-        payload = await self.client.fetch_api(
+        payload = await (await self._get_client()).fetch_api(
             "https://www.zhihu.com/api/v4/pins/"
             f"{pin_id}?include=content,content_html,created_time,updated_time,"
             "author,origin_pin"
@@ -373,7 +378,7 @@ class ZhihuParser(BaseParser):
         try:
             return ARTICLE_DECODER.decode(await self._fetch_api_bytes(url))
         except ParseException:
-            initial, _ = await self.client.fetch_page(
+            initial, _ = await (await self._get_client()).fetch_page(
                 f"https://zhuanlan.zhihu.com/p/{article_id}",
                 validator=lambda data: article_id in (initial_entities(data).get("articles") or {}),
             )
@@ -394,7 +399,7 @@ class ZhihuParser(BaseParser):
         try:
             return ANSWER_DECODER.decode(await self._fetch_api_bytes(url))
         except ParseException:
-            initial, _ = await self.client.fetch_page(
+            initial, _ = await (await self._get_client()).fetch_page(
                 f"https://www.zhihu.com/api/v4/answers/{answer_id}",
                 validator=lambda data: answer_id in (initial_entities(data).get("answers") or {}),
             )
@@ -415,7 +420,7 @@ class ZhihuParser(BaseParser):
         try:
             return QUESTION_DECODER.decode(await self._fetch_api_bytes(url))
         except ParseException:
-            initial, _ = await self.client.fetch_page(
+            initial, _ = await (await self._get_client()).fetch_page(
                 f"https://www.zhihu.com/question/{question_id}",
                 validator=lambda data: self._has_question(data, question_id),
             )
@@ -428,7 +433,7 @@ class ZhihuParser(BaseParser):
 
     async def _first_answer(self, question_id: str) -> Answer | None:
         try:
-            initial, _ = await self.client.fetch_page(
+            initial, _ = await (await self._get_client()).fetch_page(
                 f"https://www.zhihu.com/question/{question_id}",
                 validator=lambda data: self._pick_answer_id(data, question_id) is not None,
             )
@@ -448,7 +453,7 @@ class ZhihuParser(BaseParser):
         if not bool(self.get_config_value("include_comments", "true").lower() == "true"):
             return ()
         try:
-            payload = await self.client.fetch_api(
+            payload = await (await self._get_client()).fetch_api(
                 f"https://www.zhihu.com/api/v4/comment_v5/{path}/root_comment?order_by=score&limit=20"
             )
             page = COMMENT_DECODER.decode(self._json_bytes(payload))
@@ -472,7 +477,7 @@ class ZhihuParser(BaseParser):
         return tuple(result)
 
     async def _fetch_api_bytes(self, url: str) -> bytes:
-        payload = await self.client.fetch_api(url)
+        payload = await (await self._get_client()).fetch_api(url)
         return self._json_bytes(payload)
 
     @staticmethod
@@ -600,7 +605,7 @@ class ZhihuParser(BaseParser):
         if not video_id:
             return None
         try:
-            payload = await self.client.fetch_api(
+            payload = await (await self._get_client()).fetch_api(
                 "https://www.zhihu.com/api/v4/video/play_info",
                 method="POST",
                 json_body={

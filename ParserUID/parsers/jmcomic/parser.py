@@ -168,9 +168,9 @@ class JMComicParser(BaseParser):
 
     @handle("18comic.vip/photo", r"18comic\.vip/photo/(?P<comic_id>\d{5,})")
     @handle("18comic.vip/album", r"18comic\.vip/album/(?P<comic_id>\d{5,})")
-    @handle("jm", r"jm(?P<comic_id>\d+)")
-    @handle("JM", r"JM(?P<comic_id>\d+)")
-    @handle("Jm", r"Jm(?P<comic_id>\d+)")
+    @handle("jm", r"(?<![A-Za-z0-9])jm\s*(?P<comic_id>\d+)")
+    @handle("JM", r"(?<![A-Za-z0-9])JM\s*(?P<comic_id>\d+)")
+    @handle("Jm", r"(?<![A-Za-z0-9])Jm\s*(?P<comic_id>\d+)")
     async def _parse(self, searched: re.Match[str]) -> Sequence[ContentItem]:
         comic_id = searched.group("comic_id").lstrip("0")
         if not comic_id:

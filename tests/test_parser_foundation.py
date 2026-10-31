@@ -5,14 +5,16 @@ from __future__ import annotations
 import re
 import sys
 import json
+import asyncio
 import importlib.util
 from typing import ClassVar
 from pathlib import Path
+from collections.abc import Sequence
 
 import pytest
 
 from gsuid_core.bot import Bot, _Bot
-from ParserUID.parser import ParserRuntime
+from ParserUID.parser import ParserRuntime, extract_match_source
 from ParserUID.sender import ContentItem
 from gsuid_core.models import Event
 from ParserUID.parsers.base import BaseParser, handle
@@ -54,6 +56,14 @@ class PropertyBackedParser(BaseParser):
     @handle("property.example/video/", r"property\.example/video/(?P<id>\d+)")
     async def parse_video(self, searched: re.Match[str]) -> list[ContentItem]:
         return [self.create_text_content(searched.group("id"))]
+
+
+class KeywordParser(BaseParser):
+    platform: ClassVar[Platform] = Platform(name="keyword_test", display_name="关键词测试")
+
+    @handle("jm", r"(?<![A-Za-z0-9])jm\s*(?P<comic_id>\d+)")
+    async def parse_keyword(self, searched: re.Match[str]) -> list[ContentItem]:
+        return [self.create_text_content(searched.group("comic_id"))]
 
 
 def test_parser_manifest_validation() -> None:
@@ -208,6 +218,51 @@ def test_handler_discovery_does_not_evaluate_properties() -> None:
     parser = PropertyBackedParser()
 
     assert list(parser._handlers) == ["property.example/video/"]
+
+
+def test_extract_match_source_falls_back_to_message_text() -> None:
+    event = Event(
+        bot_id="bot",
+        user_id="user",
+        group_id="group",
+        msg_id="message",
+        raw_text="jm 123456",
+    )
+
+    assert extract_match_source(event, include_reply=False) == "jm 123456"
+
+
+@pytest.mark.anyio
+async def test_dispatch_matches_keyword_without_url() -> None:
+    parser = KeywordParser()
+    pattern = dict(parser.get_registered_specs())["jm"]
+    snapshot = RegistrySnapshot(
+        parsers={"keyword": parser},
+        rules=[("jm", pattern, parser)],
+    )
+    parsed: list[str] = []
+
+    async def send_result(_bot: Bot, _event: Event, result: Sequence[ContentItem]) -> bool:
+        parsed.extend(item.text() for item in result if isinstance(item, TextContent))
+        return True
+
+    runtime = ParserRuntime(snapshot, send_result=send_result)
+    event = Event(
+        bot_id="bot",
+        user_id="user",
+        group_id="group",
+        msg_id="message",
+        raw_text="jm 123456",
+    )
+    bot = Bot(_Bot("bot"), event)
+
+    try:
+        assert await runtime.dispatch(bot, event) is True
+        await asyncio.gather(*runtime._tasks)
+    finally:
+        await runtime.close()
+
+    assert parsed == ["123456"]
 
 
 @pytest.mark.anyio
