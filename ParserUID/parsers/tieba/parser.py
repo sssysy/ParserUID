@@ -66,10 +66,17 @@ class TiebaParser(BaseParser):
             avatar_url=info.author.avatar_url or None,
             uid=str(info.author.user_id or "") or None,
         )
-        cover = self._first_image_url(info.contents)
+        cover = self._first_cover_url(info.contents)
         forum_info = f"来自：{info.forum_name}吧" if info.forum_name else None
 
-        has_video = any(item.kind == "video" for item in info.contents)
+        video_fragment = next(
+            (item.video for item in info.contents if item.kind == "video" and item.video is not None),
+            None,
+        )
+        has_video = video_fragment is not None
+        duration_text = (
+            f"{int(video_fragment.duration)}s" if video_fragment is not None and video_fragment.duration > 0 else None
+        )
         await self.send_info(
             title=info.title,
             card_type="video" if has_video else "common",
@@ -80,6 +87,7 @@ class TiebaParser(BaseParser):
             metrics=build_metrics(info),
             comments=comments,
             blocks=self._blocks(info.contents),
+            video_duration=duration_text,
         )
         return self.result(contents)
 
@@ -164,10 +172,18 @@ class TiebaParser(BaseParser):
         return tuple(output)
 
     @staticmethod
-    def _first_image_url(fragments: list[Fragment]) -> str | None:
+    def _first_cover_url(fragments: list[Fragment]) -> str | None:
         for item in fragments:
             if item.kind == "image" and item.image is not None:
                 url = normalize_media_url(item.image.url, hosts=IMAGE_HOSTS)
                 if url:
                     return url
+            if item.kind == "video" and item.video is not None:
+                url = normalize_media_url(item.video.cover_url, hosts=IMAGE_HOSTS)
+                if url:
+                    return url
         return None
+
+    @staticmethod
+    def _first_image_url(fragments: list[Fragment]) -> str | None:
+        return TiebaParser._first_cover_url(fragments)

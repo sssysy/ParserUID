@@ -423,7 +423,6 @@ class PixivParser(BaseParser):
         if not image_urls:
             raise ParseException("Pixiv 未找到漫画图片")
         pdf = self._create_pdf_content(pid, image_urls)
-        blocks = self._blocks(image_urls)
         await self.send_info(
             title=title or "Pixiv 漫画",
             card_type="common",
@@ -432,6 +431,5 @@ class PixivParser(BaseParser):
             text=text,
             url=f"{PIXIV_BASE}/artworks/{pid}",
             extra_info=series_info or None,
-            blocks=blocks,
         )
         return self.result([pdf])

@@ -33,6 +33,7 @@ from .utils import (
     normalize_url,
     extract_rich_text,
     parse_dynamic_time,
+    format_dynamic_time,
     is_allowed_media_host,
     is_bilibili_media_host,
 )
@@ -50,7 +51,7 @@ from .models import (
 from .comment import comment_limit, decode_comments as decode_card_comments
 from ...utils.ffmpeg import merge_av
 from ...utils.models import Platform, MediaContent
-from ...render.models import Author, Metric, Comment
+from ...render.models import Author, Metric, Comment, PreviewCard
 from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException
 
@@ -920,6 +921,20 @@ class BilibiliParser(BaseParser):
         text, images = self._dynamic_content(modules)
         cover: str | None = None
         url = f"https://t.bilibili.com/{ident}"
+        top_data = modules.get("module_top")
+        if isinstance(top_data, dict):
+            album = top_data.get("album")
+            display = top_data.get("display")
+            if not isinstance(album, dict) and isinstance(display, dict):
+                album = display.get("album")
+            if isinstance(album, dict):
+                for pic in album.get("pics") or []:
+                    if isinstance(pic, dict) and isinstance(pic.get("url"), str):
+                        source = pic["url"]
+                        if is_allowed_media_host(source):
+                            normalized = normalize_url(source)
+                            if normalized not in images:
+                                images.append(normalized)
         if isinstance(dynamic_data, dict):
             desc = dynamic_data.get("desc")
             if isinstance(desc, dict):
@@ -932,7 +947,9 @@ class BilibiliParser(BaseParser):
                         if isinstance(pic, dict) and isinstance(pic.get("src"), str):
                             source = pic["src"]
                             if is_allowed_media_host(source):
-                                images.append(normalize_url(source))
+                                normalized = normalize_url(source)
+                                if normalized not in images:
+                                    images.append(normalized)
                 archive = major.get("archive")
                 if isinstance(archive, dict):
                     title = title or str(archive.get("title") or "")
@@ -953,7 +970,24 @@ class BilibiliParser(BaseParser):
                         if isinstance(pic, dict) and isinstance(pic.get("url"), str):
                             source = pic["url"]
                             if is_allowed_media_host(source):
-                                images.append(normalize_url(source))
+                                normalized = normalize_url(source)
+                                if normalized not in images:
+                                    images.append(normalized)
+                article = major.get("article")
+                if isinstance(article, dict):
+                    title = title or str(article.get("title") or "")
+                    cover = cover or (normalize_url(str(article.get("cover") or "")) or None)
+                    jump_url = article.get("jump_url")
+                    if isinstance(jump_url, str) and jump_url.startswith("http"):
+                        url = jump_url
+                live_rcmd = major.get("live_rcmd")
+                if isinstance(live_rcmd, dict):
+                    content = live_rcmd.get("content")
+                    if isinstance(content, dict):
+                        live_info = content.get("live_play_info")
+                        if isinstance(live_info, dict):
+                            title = title or str(live_info.get("title") or "")
+                            cover = cover or (normalize_url(str(live_info.get("cover") or "")) or None)
         stat = modules.get("module_stat")
         metrics: list[Metric] = []
         if isinstance(stat, dict):
@@ -965,6 +999,19 @@ class BilibiliParser(BaseParser):
                 node = stat.get(key)
                 if isinstance(node, dict):
                     metrics.append(metric(label, node.get("count")))
+        orig_data = item.get("orig")
+        orig_dynamic: BiliDynamicContent | None = None
+        if isinstance(orig_data, dict):
+            orig_id = str(orig_data.get("id_str") or "")
+            parsed_orig = self._build_dynamic(orig_data, orig_id)
+            if (
+                parsed_orig.text
+                or parsed_orig.title
+                or parsed_orig.images
+                or parsed_orig.cover
+                or parsed_orig.author.name
+            ):
+                orig_dynamic = parsed_orig
         dynamic = BiliDynamicContent(
             url=url,
             title=title or None,
@@ -973,8 +1020,32 @@ class BilibiliParser(BaseParser):
             images=images,
             cover=cover,
             metrics=metrics,
+            orig=orig_dynamic,
         )
         return dynamic
+
+    def _build_repost_card(self, orig: BiliDynamicContent) -> PreviewCard:
+        author = self.create_author(
+            orig.author.name or "哔哩哔哩用户",
+            clean_cover(orig.author.face),
+            description=orig.author.sign or None,
+            uid=orig.author.mid or None,
+        )
+        nested_repost = self._build_repost_card(orig.orig) if orig.orig is not None else None
+        timestamp = format_dynamic_time(orig.author.timestamp)
+        return PreviewCard(
+            platform_name=self.platform.name,
+            platform_display_name=self.platform.display_name,
+            title=orig.title or "原动态",
+            text=orig.text or orig.title or "",
+            author=author,
+            source_url=orig.url or None,
+            cover_url=next(iter(orig.images), orig.cover),
+            repost=nested_repost,
+            blocks=build_image_blocks(orig.images, limit=self.card_image_limit),
+            metrics=tuple(orig.metrics),
+            timestamp=timestamp,
+        )
 
     async def _finish_dynamic(self, dynamic: BiliDynamicContent):
         author = self.create_author(
@@ -983,6 +1054,7 @@ class BilibiliParser(BaseParser):
             description=dynamic.author.sign or None,
             uid=dynamic.author.mid or None,
         )
+        repost = self._build_repost_card(dynamic.orig) if dynamic.orig is not None else None
         await self.send_info(
             card_type="common",
             title=dynamic.title or "哔哩哔哩动态",
@@ -992,12 +1064,20 @@ class BilibiliParser(BaseParser):
             blocks=build_image_blocks(dynamic.images, limit=self.card_image_limit),
             url=dynamic.url,
             metrics=dynamic.metrics,
+            repost=repost,
         )
         contents: list[MediaContent] = []
         if dynamic.images:
             contents = self.create_image_contents(dynamic.images, headers=self.media_headers, proxy=self.proxy)
         elif dynamic.cover:
             contents = self.create_image_contents([dynamic.cover], headers=self.media_headers, proxy=self.proxy)
+        elif dynamic.orig is not None:
+            if dynamic.orig.images:
+                contents = self.create_image_contents(dynamic.orig.images, headers=self.media_headers, proxy=self.proxy)
+            elif dynamic.orig.cover:
+                contents = self.create_image_contents(
+                    [dynamic.orig.cover], headers=self.media_headers, proxy=self.proxy
+                )
         return self.result(contents)
 
     async def _parse_live_by_id(self, room_id: int):

@@ -310,7 +310,7 @@ async def prepare_template_card(
         source_url=card.source_url,
         hero_uri=hero_uri,
         ambient_uri=await _ambient_data(card, proxy=proxy) if dark else "",
-        show_hero=bool(hero_uri) and not blocks and not card.text,
+        show_hero=bool(hero_uri) and not blocks,
         blocks=blocks,
         metrics=metrics,
         comments=await _comment_templates(card.comments, proxy=proxy),

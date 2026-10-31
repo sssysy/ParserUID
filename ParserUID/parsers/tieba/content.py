@@ -22,6 +22,11 @@ IMAGE_HOSTS: Final[tuple[str, ...]] = (
     "gsp0.baidu.com",
 )
 VIDEO_HOST = "tieba.baidu.com"
+VIDEO_HOSTS: Final[tuple[str, ...]] = (
+    "tieba.baidu.com",
+    "baidu.com",
+    "bdstatic.com",
+)
 EMOJI_URL = "https://gsp0.baidu.com/5aAHeD3nKhI2p27j8IqW0jdnxx1xbK/tb/editor/images/client/{name}.png"
 
 
@@ -162,7 +167,7 @@ def _fragment(payload: PbContent) -> Fragment | None:
             return None
         return Fragment("link", text=label, url=url)
     if kind == 5:
-        url = normalize_media_url(payload.link, hosts=(VIDEO_HOST,))
+        url = normalize_media_url(payload.link, hosts=VIDEO_HOSTS)
         if not url:
             return None
         return Fragment(
@@ -280,6 +285,20 @@ def decode_page(result: PbPageResIdl, *, comment_limit: int) -> ThreadInfo:
     contents = merge_text_fragments(fragments(list(main.content))) if main is not None else []
     if not contents and thread.first_post_content:
         contents = merge_text_fragments(fragments(list(thread.first_post_content)))
+    if not any(item.kind == "video" for item in contents) and thread.video_info.video_url:
+        video_url = normalize_media_url(thread.video_info.video_url, hosts=VIDEO_HOSTS)
+        if video_url:
+            cover_url = normalize_media_url(thread.video_info.thumbnail_url, hosts=IMAGE_HOSTS)
+            contents.append(
+                Fragment(
+                    "video",
+                    video=VideoRef(
+                        url=video_url,
+                        cover_url=cover_url,
+                        duration=float(thread.video_info.video_duration or 0),
+                    ),
+                )
+            )
     contents.extend(Fragment("text", text=line) for line in _poll_lines(result))
     comments: list[CommentInfo] = []
     if comment_limit > 0:

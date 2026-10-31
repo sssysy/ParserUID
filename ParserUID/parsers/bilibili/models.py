@@ -259,6 +259,7 @@ class BiliDynamicContent:
     images: list[str] = field(default_factory=list)
     cover: str | None = None
     metrics: list[Metric] = field(default_factory=list)
+    orig: BiliDynamicContent | None = None
 
 
 def decode_video(payload: object) -> BiliVideoInfo:

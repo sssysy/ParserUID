@@ -138,3 +138,14 @@ def extract_rich_text(nodes: object) -> str:
             if raw:
                 parts.append(str(raw))
     return "".join(parts)
+
+
+def format_dynamic_time(value: int | None) -> str | None:
+    if value is None or value <= 0:
+        return None
+    from datetime import datetime
+
+    try:
+        return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, OSError):
+        return None
