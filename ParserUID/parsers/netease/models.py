@@ -1,35 +1,47 @@
-"""网易云音乐接口数据模型。"""
+"""网易云音乐官方接口数据模型。"""
 
 from __future__ import annotations
 
 from msgspec import Struct
 
 
-class SongInfo(Struct, frozen=True):
-    name: str = "未知歌曲"
-    singer: str = "未知歌手"
-    duration: str = "00:00"
-    picimg: str = ""
+class SongArtist(Struct, frozen=True):
+    name: str = ""
 
 
-class SongInfoResponse(Struct, frozen=True):
+class SongAlbum(Struct, frozen=True):
+    name: str = ""
+    picUrl: str = ""
+
+
+class SongDetail(Struct, frozen=True):
+    id: int = 0
+    name: str = ""
+    duration: int = 0
+    artists: list[SongArtist] = []
+    album: SongAlbum = SongAlbum()
+
+
+class SongDetailResponse(Struct, frozen=True):
     code: int = 0
-    data: SongInfo = SongInfo()
+    songs: list[SongDetail] = []
 
 
-class SongLyric(Struct, frozen=True):
-    lrc: str = ""
+class LyricBody(Struct, frozen=True):
+    lyric: str = ""
 
 
 class SongLyricResponse(Struct, frozen=True):
-    code: int = 0
-    data: SongLyric = SongLyric()
+    lrc: LyricBody = LyricBody()
 
 
-class SongUrl(Struct, frozen=True):
+class SongUrlItem(Struct, frozen=True):
     url: str = ""
+    br: int = 0
+    type: str = ""
+    level: str = ""
 
 
 class SongUrlResponse(Struct, frozen=True):
     code: int = 0
-    data: SongUrl = SongUrl()
+    data: list[SongUrlItem] = []

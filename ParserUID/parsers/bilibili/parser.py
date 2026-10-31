@@ -836,9 +836,9 @@ class BilibiliParser(BaseParser):
             params={"id": opus_id, "timezone_offset": -480},
             error="获取图文信息失败",
         )
-        if payload.get("code") == -352:
-            raise ParseException("获取图文信息失败，B 站风控拦截")
-        if payload.get("code") != 0 or not isinstance(payload.get("data"), dict):
+        if payload.get("code") != 0:
+            return await self._parse_dynamic_by_id(opus_id)
+        if not isinstance(payload.get("data"), dict):
             raise ParseException(str(payload.get("message") or "图文不存在"))
         item = payload["data"].get("item")
         if not isinstance(item, dict):
@@ -846,10 +846,59 @@ class BilibiliParser(BaseParser):
         dynamic = self._build_dynamic(item, opus_id)
         return await self._finish_dynamic(dynamic)
 
+    @staticmethod
+    def _dynamic_modules(modules: object) -> dict[str, dict[str, object]]:
+        if isinstance(modules, dict):
+            return {key: value for key, value in modules.items() if isinstance(key, str) and isinstance(value, dict)}
+        if not isinstance(modules, list):
+            return {}
+        result: dict[str, dict[str, object]] = {}
+        for module in modules:
+            if not isinstance(module, dict):
+                continue
+            module_type = module.get("module_type")
+            if not isinstance(module_type, str):
+                continue
+            for key, value in module.items():
+                if key != "module_type" and key.startswith("module_") and isinstance(value, dict):
+                    result.setdefault(key, value)
+        return result
+
+    @staticmethod
+    def _dynamic_rich_text(value: object) -> str:
+        if not isinstance(value, dict):
+            return ""
+        return extract_rich_text(value.get("rich_text_nodes") or value.get("nodes")) or str(value.get("text") or "")
+
+    @staticmethod
+    def _dynamic_content(modules: dict[str, dict[str, object]]) -> tuple[str, list[str]]:
+        texts: list[str] = []
+        images: list[str] = []
+        content = modules.get("module_content")
+        if content is None:
+            return "", images
+        paragraphs = content.get("paragraphs")
+        if not isinstance(paragraphs, list):
+            return "", images
+        for paragraph in paragraphs:
+            if not isinstance(paragraph, dict):
+                continue
+            text = BilibiliParser._dynamic_rich_text(paragraph.get("text"))
+            if text:
+                texts.append(text)
+            pic = paragraph.get("pic")
+            if not isinstance(pic, dict):
+                continue
+            for item in pic.get("pics") or []:
+                if not isinstance(item, dict):
+                    continue
+                url = item.get("url")
+                if isinstance(url, str) and is_allowed_media_host(url):
+                    images.append(normalize_url(url))
+        return "\n".join(texts), images
+
     def _build_dynamic(self, item: dict[str, object], ident: str) -> BiliDynamicContent:
-        modules = item.get("modules")
-        if not isinstance(modules, dict):
-            modules = {}
+        modules = self._dynamic_modules(item.get("modules"))
         author_data = modules.get("module_author")
         author = BiliDynamicAuthor()
         if isinstance(author_data, dict):
@@ -861,23 +910,28 @@ class BilibiliParser(BaseParser):
                 timestamp=parse_dynamic_time(author_data.get("pub_ts") or author_data.get("pub_time")),
             )
         basic = item.get("basic")
-        title = str(basic.get("title") or "") if isinstance(basic, dict) else ""
+        basic_title = str(basic.get("title") or "") if isinstance(basic, dict) else ""
+        title = "" if basic_title.endswith("的动态 - 哔哩哔哩") else basic_title
+        title_data = modules.get("module_title")
+        if isinstance(title_data, dict):
+            title = title or str(title_data.get("text") or "")
         dynamic_data = modules.get("module_dynamic")
-        text = ""
-        images: list[str] = []
+        text, images = self._dynamic_content(modules)
         cover: str | None = None
         url = f"https://t.bilibili.com/{ident}"
         if isinstance(dynamic_data, dict):
             desc = dynamic_data.get("desc")
             if isinstance(desc, dict):
-                text = extract_rich_text(desc.get("rich_text_nodes")) or str(desc.get("text") or "")
+                text = text or self._dynamic_rich_text(desc)
             major = dynamic_data.get("major")
             if isinstance(major, dict):
                 draw = major.get("draw")
                 if isinstance(draw, dict):
                     for pic in draw.get("items", []):
                         if isinstance(pic, dict) and isinstance(pic.get("src"), str):
-                            images.append(normalize_url(pic["src"]))
+                            source = pic["src"]
+                            if is_allowed_media_host(source):
+                                images.append(normalize_url(source))
                 archive = major.get("archive")
                 if isinstance(archive, dict):
                     title = title or str(archive.get("title") or "")
@@ -893,12 +947,12 @@ class BilibiliParser(BaseParser):
                     title = title or str(opus_data.get("title") or "")
                     summary = opus_data.get("summary")
                     if isinstance(summary, dict):
-                        text = (
-                            text or extract_rich_text(summary.get("rich_text_nodes")) or str(summary.get("text") or "")
-                        )
+                        text = text or self._dynamic_rich_text(summary)
                     for pic in opus_data.get("pics", []):
                         if isinstance(pic, dict) and isinstance(pic.get("url"), str):
-                            images.append(normalize_url(pic["url"]))
+                            source = pic["url"]
+                            if is_allowed_media_host(source):
+                                images.append(normalize_url(source))
         stat = modules.get("module_stat")
         metrics: list[Metric] = []
         if isinstance(stat, dict):
@@ -932,7 +986,7 @@ class BilibiliParser(BaseParser):
             card_type="common",
             title=dynamic.title or "哔哩哔哩动态",
             author=author,
-            text=dynamic.text,
+            text=dynamic.text or "",
             cover_url=next(iter(dynamic.images), dynamic.cover),
             url=dynamic.url,
             metrics=dynamic.metrics,
