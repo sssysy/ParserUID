@@ -17,7 +17,6 @@ from .media import (
     InstagramMedia,
     InstagramTarget,
     image_urls,
-    media_title,
     parse_target,
     author_avatar,
     video_formats,
@@ -138,7 +137,6 @@ class InstagramParser(BaseParser):
                         url=str(selected["url"]),
                         cover=pick_thumbnail(entry),
                         duration=_float_or_zero(entry.get("duration")),
-                        title=media_title(entry),
                     )
                 )
                 continue
@@ -179,7 +177,7 @@ class InstagramParser(BaseParser):
                 avatar_url=post.author_avatar,
                 uid=post.author_id,
             )
-        if post.has_video:
+        if post.is_video_post:
             video = next(item for item in post.medias if item.kind == "video")
             await self.send_info(
                 title=post.title or "Instagram 视频",
@@ -192,8 +190,9 @@ class InstagramParser(BaseParser):
                 timestamp=post.timestamp,
             )
             return
+        video_count = sum(item.kind == "video" for item in post.medias)
         await self.send_info(
-            title=post.title or "Instagram 图文",
+            title=post.title or ("Instagram 图文" if video_count == 0 else "Instagram 图文实况"),
             card_type="common",
             author=author,
             cover_url=post.cover,

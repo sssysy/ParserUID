@@ -2,7 +2,7 @@
 
 ## PreviewCard 数据
 
-皮肤接收 `ParserUID.render.models.PreviewCard`。常用字段：
+皮肤接收 `render.models` 中的 `PreviewCard`。常用字段：
 
 | 字段 | 含义 |
 |------|------|
@@ -49,8 +49,8 @@ Jinja 环境已启用 `select_autoescape(("html", "xml"))`，不要为了省事�
 ```python
 from collections.abc import Mapping
 
-from ParserUID.render import helpers
-from ParserUID.render.models import PreviewCard
+from ... import helpers
+from ...models import PreviewCard
 
 
 def _avatar_uri(card: PreviewCard) -> str:
@@ -101,9 +101,9 @@ def prepare_context(card: PreviewCard) -> Mapping[str, object]:
 ```python
 from collections.abc import Mapping
 
-from ParserUID.render import helpers
-from ParserUID.render.models import ImageBlock, PreviewCard, TextBlock
-from ParserUID.render.template_data import CARD_FOOTER
+from ... import helpers
+from ...models import ImageBlock, PreviewCard, TextBlock
+from ...template_data import CARD_FOOTER
 
 
 def _avatar(card: PreviewCard) -> str:

@@ -251,7 +251,7 @@ class TelegramParser(BaseParser):
         )
         if video is not None:
             await self.send_info(
-                title=post.text or post.channel_title or "Telegram 视频",
+                title="",
                 card_type="video",
                 author=author,
                 cover_url=cover_url,
@@ -265,7 +265,7 @@ class TelegramParser(BaseParser):
             )
             return
         await self.send_info(
-            title=post.text or post.channel_title or "Telegram 频道",
+            title="",
             card_type="common",
             author=author,
             cover_url=cover_url,

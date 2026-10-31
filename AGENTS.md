@@ -343,6 +343,13 @@ GsCore 的 `Bot.send()` 不向插件返回适配器发送结果。只有显式�
 - 所有函数、方法和公开属性必须有可追踪的类型注解。
 - 所有可能阻塞的 I/O 都必须是异步的，或显式经过 `asyncio.to_thread()`。
 - 使用 `pathlib.Path`，不拼接字符串路径。
+- 插件自身生产代码的包内导入必须使用相对导入，禁止
+  `from ParserUID.xxx import ...`、`import ParserUID.xxx` 或等价的动态绝对导入；
+  `gsuid_core` 等外部依赖仍使用绝对导入。按当前模块层级选择位数，例如
+  `parsers/<name>/parser.py` 使用 `from ..base import ...` 和
+  `from ...utils.models import ...`，`render/pack/<name>/context.py` 使用
+  `from ...models import ...`。第三方解析器和皮肤包不要求相对导入，可按加载器
+  提供的模块命名空间和兼容接口选择导入方式。
 - import 直达具体模块。不要在 `__init__.py` 用 `__all__` 聚合转发业务函数。
 - 模块依赖只能从下层指向上层，禁止循环导入。建议方向为 `utils` -> `render` -> `sender` / `parsers` -> `parser.py`。
 - 注释最多两行，每行不超过 88 个字符，只解释原因、边界或坑，不翻译代码。
@@ -442,6 +449,7 @@ python -m basedpyright ParserUID
 - [ ] 网页配置页可控制解析器启停和选择皮肤包，其他阈值留在普通配置。
 - [ ] 未添加任何 AI 入口，除非用户明确要求接入 AI。
 - [ ] 没有 `Any`、`cast`、`type: ignore`，没有用 `getattr` 或 `dict.get` 兜底。
+- [ ] 插件自身生产代码使用相对导入，没有 `ParserUID.*` 绝对导入；第三方资源按加载器兼容方式导入。
 - [ ] 没有在事件循环中调用同步阻塞代码。
 - [ ] 日志使用 `[Parser·功能名]`，不输出 Cookie、Token、签名或完整敏感响应。
 - [ ] 验证离线运行，且覆盖本次修改涉及的 URL、注册、发送或渲染边界。

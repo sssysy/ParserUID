@@ -77,6 +77,7 @@ class PixivParser(BaseParser):
             name=str(body.get("name") or "未知作者"),
             avatar_url=avatar_url or None,
             uid=uid,
+            avatar_headers=self.media_headers,
         )
 
     async def _prepare_cover(self, cover_url: str, *, blur: bool) -> Path | None:
@@ -269,6 +270,7 @@ class PixivParser(BaseParser):
             card_type="common",
             author=author,
             cover=cover,
+            cover_headers=self.media_headers,
             text=text,
             url=f"{PIXIV_BASE}/novel/show.php?id={nid}",
             extra_info=extra_info,
@@ -366,6 +368,7 @@ class PixivParser(BaseParser):
             card_type="common",
             author=author,
             cover=cover,
+            cover_headers=self.media_headers,
             text=text,
             url=f"{PIXIV_BASE}/artworks/{pid}",
             extra_info="\n".join(info_parts) if info_parts else None,
@@ -376,7 +379,11 @@ class PixivParser(BaseParser):
     @staticmethod
     def _blocks(urls: list[str]) -> tuple[ImageBlock, ...]:
         """Pixiv 多图作品按页序进入卡片，动图与 PDF 分支保持原逻辑。"""
-        return build_image_blocks(urls, limit=card_image_limit())
+        return build_image_blocks(
+            urls,
+            limit=card_image_limit(),
+            headers=dict(PIXIV_MEDIA_HEADERS),
+        )
 
     async def _handle_manga(
         self,
@@ -413,6 +420,7 @@ class PixivParser(BaseParser):
                 card_type="common",
                 author=author,
                 cover=cover,
+                cover_headers=self.media_headers,
                 text=text,
                 url=f"{PIXIV_BASE}/artworks/{pid}",
                 extra_info=info,
@@ -428,6 +436,7 @@ class PixivParser(BaseParser):
             card_type="common",
             author=author,
             cover=cover,
+            cover_headers=self.media_headers,
             text=text,
             url=f"{PIXIV_BASE}/artworks/{pid}",
             extra_info=series_info or None,

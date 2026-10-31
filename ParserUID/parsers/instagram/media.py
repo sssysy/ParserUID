@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Literal
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -15,11 +16,10 @@ class InstagramTarget:
 
 @dataclass(frozen=True, slots=True)
 class InstagramMedia:
-    kind: str
+    kind: Literal["image", "video"]
     url: str
     cover: str | None = None
     duration: float = 0.0
-    title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,8 +35,9 @@ class InstagramPost:
     medias: tuple[InstagramMedia, ...]
 
     @property
-    def has_video(self) -> bool:
-        return any(item.kind == "video" for item in self.medias)
+    def is_video_post(self) -> bool:
+        """只有全部条目都是视频时才使用视频卡片版式。"""
+        return bool(self.medias) and all(item.kind == "video" for item in self.medias)
 
 
 def parse_target(matched: str) -> InstagramTarget:
@@ -110,23 +111,6 @@ def pick_thumbnail(info: dict[str, object]) -> str | None:
         value = info.get(key)
         if _trusted_media_url(value):
             return str(value)
-    return None
-
-
-def media_title(info: dict[str, object]) -> str | None:
-    """读取单条轮播稿件的标题，缺失时退回描述首行。"""
-    for key in ("title", "fulltitle"):
-        value = info.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    description = info.get("description")
-    if isinstance(description, str):
-        first_line = next(
-            (line.strip() for line in description.splitlines() if line.strip()),
-            "",
-        )
-        if first_line:
-            return first_line[:120]
     return None
 
 

@@ -9,15 +9,17 @@ def build_image_blocks(
     urls: list[str],
     *,
     limit: int = 0,
+    headers: dict[str, str] | None = None,
 ) -> tuple[ImageBlock, ...]:
     """把图片地址转为正文图片块，limit 大于 0 时限制卡片图片数量。"""
     blocks: list[ImageBlock] = []
+    block_headers = headers or {}
     for url in urls:
         if not url:
             continue
         if 0 < limit <= len(blocks):
             break
-        blocks.append(ImageBlock(url=url))
+        blocks.append(ImageBlock(url=url, headers=block_headers))
     return tuple(blocks)
 
 

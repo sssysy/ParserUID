@@ -65,7 +65,7 @@ HTML 入口就是 Jinja 模板。`default.html` 是最低回退：
 ```python
 from collections.abc import Mapping
 
-from ParserUID.render.models import PreviewCard
+from ...models import PreviewCard
 
 
 def prepare_context(card: PreviewCard) -> Mapping[str, object]:

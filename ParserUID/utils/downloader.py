@@ -441,11 +441,17 @@ _GLOBAL_DOWNLOADER = Downloader()
 async def download_image(
     url: str,
     *,
+    headers: dict[str, str] | None = None,
     proxy: str | None = None,
     max_bytes: int = DEFAULT_IMAGE_MAX_BYTES,
 ) -> Path:
     """兼容旧调用接口的图片下载辅助函数。"""
-    return await _GLOBAL_DOWNLOADER.download_image(url, proxy=proxy, max_bytes=max_bytes)
+    return await _GLOBAL_DOWNLOADER.download_image(
+        url,
+        headers=headers,
+        proxy=proxy,
+        max_bytes=max_bytes,
+    )
 
 
 async def clean_image_cache(*, max_age_seconds: int = DEFAULT_CACHE_MAX_AGE_SECONDS) -> int:

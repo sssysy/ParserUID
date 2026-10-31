@@ -93,15 +93,15 @@
 # 知乎
 
 ## 专栏
-- [ ] https://zhuanlan.zhihu.com/p/450105902 | 渲染卡片解析出来两遍
-- [ ] https://zhuanlan.zhihu.com/p/2077393473846694339 | 渲染卡片解析出来两遍
+- [x] https://zhuanlan.zhihu.com/p/450105902
+- [x] https://zhuanlan.zhihu.com/p/2077393473846694339
 
 ## 回答
-- [ ] https://www.zhihu.com/question/2098940094346433079/answer/2099831118455481183 | 渲染卡片解析出来两遍
+- [x] https://www.zhihu.com/question/2098940094346433079/answer/2099831118455481183
 
 # AcFun
 
-## 视频 | 视频获取失败，卡片可渲染
+## 视频 | 
 - [ ] https://www.acfun.cn/v/ac48934093
 
 # Instagram
@@ -133,13 +133,13 @@
 # Pixiv
 
 ## 插画 | 预览图无图片
-- [ ] https://www.pixiv.net/artworks/139555691
+- [x] https://www.pixiv.net/artworks/139555691
 
 ## 漫画 | 预览图无封面
-- [ ] https://www.pixiv.net/artworks/139855966
+- [x] https://www.pixiv.net/artworks/139855966
 
 ## 小说 | 预览图无封面
-- [ ] https://www.pixiv.net/novel/show.php?id=28299885
+- [x] https://www.pixiv.net/novel/show.php?id=28299885
 
 # QQ音乐
 - [ ] 没有测试

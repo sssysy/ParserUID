@@ -18,7 +18,7 @@ from .comment import comment_limit, decode_comments
 from ...sender import ContentItem
 from ...utils.models import Platform
 from ...render.models import Comment
-from ...utils.exceptions import ParseException
+from ...utils.exceptions import ParseException, DownloadException
 
 try:
     import jmcomic
@@ -230,9 +230,15 @@ class JMComicParser(BaseParser):
             cover_path: Path | None = None
             nsfw_mode = self.get_config_value("nsfw", "blur")
             if nsfw_mode != "ignore" and album_cover_url:
-                cover_path = await self.downloader.download_image(album_cover_url, proxy=self.proxy)
-                if nsfw_mode == "blur":
-                    cover_path = await asyncio.to_thread(self._blur, cover_path)
+                try:
+                    cover_path = await self.downloader.download_image(album_cover_url, proxy=self.proxy)
+                    if nsfw_mode == "blur":
+                        cover_path = await asyncio.to_thread(self._blur, cover_path)
+                except DownloadException as exc:
+                    logger.warning(
+                        f"[Parser·JMComic] 封面下载失败，继续解析 | comic_id={comic_id} "
+                        f"| error_type={type(exc).__name__}",
+                    )
 
             send_text = (
                 f"标题: {album_title}\n"

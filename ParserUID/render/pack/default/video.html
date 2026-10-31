@@ -101,8 +101,8 @@
             </div>
         </section>
         <section class="content">
-            <div class="title">{{ card.title }}</div>
-            <div class="copy">{{ card.text }}</div>
+            {% if card.title %}<div class="title">{{ card.title }}</div>{% endif %}
+            {% if card.text %}<div class="copy">{{ card.text }}</div>{% endif %}
             {{ render_comments(card.comments) }}
             {% if card.extra_info %}<div class="extra">{{ card.extra_info }}</div>{% endif %}
             <div class="profile">

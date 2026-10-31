@@ -7,7 +7,7 @@ from types import FunctionType
 from typing import Literal, ClassVar
 from pathlib import Path
 from contextvars import ContextVar
-from collections.abc import Callable, Sequence, Awaitable, Coroutine
+from collections.abc import Mapping, Callable, Sequence, Awaitable, Coroutine
 
 import httpx
 
@@ -237,6 +237,7 @@ class BaseParser:
         url: str | None = None,
         cover: Path | None = None,
         cover_url: str | None = None,
+        cover_headers: dict[str, str] | None = None,
         blocks: tuple[CardBlock, ...] = (),
         metrics: tuple[Metric, ...] = (),
         comments: tuple[Comment, ...] = (),
@@ -260,6 +261,7 @@ class BaseParser:
             timestamp=str(timestamp) if timestamp is not None else None,
             cover_path=cover,
             cover_url=cover_url,
+            cover_headers=cover_headers or {},
             blocks=blocks,
             metrics=metrics,
             comments=comments,
@@ -433,6 +435,7 @@ class BaseParser:
         description: str | None = None,
         *,
         uid: str | None = None,
+        avatar_headers: Mapping[str, str] | None = None,
         metrics: tuple[Metric, ...] = (),
     ) -> Author:
         """构建作者信息对象。"""
@@ -441,6 +444,7 @@ class BaseParser:
             description=description,
             uid=uid,
             avatar_url=avatar_url,
+            avatar_headers=avatar_headers or {},
             metrics=metrics,
         )
 

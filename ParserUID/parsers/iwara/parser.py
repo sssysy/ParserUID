@@ -25,6 +25,7 @@ from .models import (
     choose_quality_url,
     image_thumbnail_url,
     video_thumbnail_url,
+    is_supported_embed_url,
 )
 from .request import API_HOST, IwaraClient
 from ...sender import ContentItem
@@ -56,7 +57,10 @@ class IwaraParser(BaseParser):
         client = self._get_client()
         try:
             raw_bytes = await client.fetch_api(f"https://{API_HOST}/video/{video_id}")
-            video = msgspec.json.decode(raw_bytes, type=IwaraVideoRaw)
+            try:
+                video = msgspec.json.decode(raw_bytes, type=IwaraVideoRaw)
+            except msgspec.ValidationError as exc:
+                raise ParseException("Iwara 视频数据格式异常") from exc
         finally:
             await client.close()
 
@@ -70,13 +74,25 @@ class IwaraParser(BaseParser):
             return ()
 
         quality = self.get_config_value("video_quality", "Source")
-        download_url, selected_quality = await self._resolve_video_url(video.fileUrl, quality)
+        download_url: str | None = None
+        embed_url: str | None = None
+        selected_quality: str | None = None
+        if video.fileUrl and video.file is not None:
+            download_url, selected_quality = await self._resolve_video_url(video.fileUrl, quality)
+        elif video.embedUrl:
+            if not is_supported_embed_url(video.embedUrl):
+                raise ParseException("Iwara 视频嵌入地址来源异常")
+            embed_url = video.embedUrl
+            selected_quality = "嵌入源"
+        else:
+            raise ParseException("Iwara 视频没有可用的下载地址")
+
         thumb = video_thumbnail_url(video.file, video.thumbnail)
         cover_path = await self._get_cover(thumb, video.rating)
 
         author_name = f"{video.user.name} ({video.user.username})" if video.user.username else video.user.name
         author = self.create_author(author_name, avatar_url(video.user))
-        duration = max(0.0, float(video.file.duration))
+        duration = max(0.0, float(video.file.duration)) if video.file is not None and video.file.duration else 0.0
         desc_text = self._description_text(video.body, tuple(t.id for t in video.tags), "视频")
 
         await self.send_info(
@@ -90,12 +106,24 @@ class IwaraParser(BaseParser):
             url=f"https://www.iwara.tv/video/{video.id}",
         )
 
-        video_item = self.create_video_content(
-            download_url,
-            duration=duration,
-            headers={"Referer": "https://www.iwara.tv/"},
-            proxy=self.proxy,
-        )
+        if download_url is not None:
+            video_item = self.create_video_content(
+                download_url,
+                duration=duration,
+                headers={"Referer": "https://www.iwara.tv/"},
+                proxy=self.proxy,
+            )
+        else:
+            if embed_url is None:
+                raise ParseException("Iwara 视频没有可用的下载地址")
+
+            async def load_embedded_video() -> Path:
+                return await self.downloader.download_with_ytdlp(
+                    embed_url,
+                    proxy=self.proxy,
+                )
+
+            video_item = self.create_video_content(None, load_embedded_video)
         return self.result([video_item])
 
     @handle(
@@ -107,7 +135,10 @@ class IwaraParser(BaseParser):
         client = self._get_client()
         try:
             raw_bytes = await client.fetch_api(f"https://{API_HOST}/image/{image_id}")
-            image_data = msgspec.json.decode(raw_bytes, type=IwaraImageRaw)
+            try:
+                image_data = msgspec.json.decode(raw_bytes, type=IwaraImageRaw)
+            except msgspec.ValidationError as exc:
+                raise ParseException("Iwara 图片数据格式异常") from exc
         finally:
             await client.close()
 

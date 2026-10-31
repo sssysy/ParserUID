@@ -50,7 +50,7 @@ PREVIEW_LIGHT_BACKGROUND: Final = (248, 250, 252)
 PREVIEW_DARK_BACKGROUND: Final = (8, 9, 11)
 PREVIEW_LIGHT_DOT: Final = (148, 163, 184)
 PREVIEW_DARK_DOT: Final = (226, 232, 240)
-_RENDER_VERSION: Final = "15"
+_RENDER_VERSION: Final = "17"
 _SKIN_NAME_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 
 
@@ -176,32 +176,46 @@ async def _download_asset_safely(
     current_path: Path | None,
     *,
     proxy: str | None,
+    headers: Mapping[str, str] | None = None,
 ) -> Path | None:
     if current_path is not None and current_path.is_file():
         return current_path
     if url is None:
         return None
     try:
-        if proxy is None:
-            return await download_image(url)
-        return await download_image(url, proxy=proxy)
+        return await download_image(
+            url,
+            headers=dict(headers) if headers else None,
+            proxy=proxy,
+        )
     except (httpx.HTTPError, DownloadException, OSError, ValueError):
         return None
 
 
 async def ensure_card_assets(card: PreviewCard, *, proxy: str | None = None) -> PreviewCard:
     """预取远程媒体资源，让皮肤模板直接使用本地路径。"""
-    cover_path = await _download_asset_safely(card.cover_url, card.cover_path, proxy=proxy)
+    cover_path = await _download_asset_safely(
+        card.cover_url,
+        card.cover_path,
+        proxy=proxy,
+        headers=card.cover_headers,
+    )
 
     author = card.author
     if author is not None:
-        avatar_path = await _download_asset_safely(author.avatar_url, author.avatar_path, proxy=proxy)
+        avatar_path = await _download_asset_safely(
+            author.avatar_url,
+            author.avatar_path,
+            proxy=proxy,
+            headers=author.avatar_headers,
+        )
         author = Author(
             name=author.name,
             description=author.description,
             uid=author.uid,
             avatar_path=avatar_path,
             avatar_url=author.avatar_url,
+            avatar_headers=author.avatar_headers,
             metrics=author.metrics,
         )
 
@@ -210,7 +224,12 @@ async def ensure_card_assets(card: PreviewCard, *, proxy: str | None = None) -> 
         if isinstance(block, TextBlock):
             blocks.append(block)
         elif isinstance(block, ImageBlock):
-            block_path = await _download_asset_safely(block.url, block.path, proxy=proxy)
+            block_path = await _download_asset_safely(
+                block.url,
+                block.path,
+                proxy=proxy,
+                headers=block.headers,
+            )
             blocks.append(ImageBlock(path=block_path, caption=block.caption) if block_path is not None else block)
 
     comments: list[Comment] = []
@@ -254,6 +273,7 @@ async def ensure_card_assets(card: PreviewCard, *, proxy: str | None = None) -> 
         source_url=card.source_url,
         cover_path=cover_path,
         cover_url=card.cover_url,
+        cover_headers=card.cover_headers,
         blocks=tuple(blocks),
         metrics=card.metrics,
         comments=tuple(comments),

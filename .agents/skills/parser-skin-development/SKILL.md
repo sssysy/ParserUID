@@ -3,7 +3,7 @@ name: parser-skin-development
 description: >
   当用户要求为 ParserUID 创建、修改、审查或调试卡片皮肤包时触发。
   适用于新增 render/pack/name/、编写 manifest.json、Jinja HTML 与可选
-  context.py、使用 ParserUID.render.helpers 处理图片、接入 PreviewCard，
+  context.py、使用相对导入的 render.helpers 处理图片、接入 PreviewCard，
   以及排查皮肤渲染、缓存和测试问题。不要用于新增平台解析器，也不要用于
   修改 GsCore 核心框架。
 ---
@@ -94,10 +94,10 @@ HTML 的旧入口。
 
 ## 常用 helpers
 
-皮肤从 `ParserUID.render` 导入：
+皮肤从当前渲染包按层级相对导入：
 
 ```python
-from ParserUID.render import helpers
+from ... import helpers
 ```
 
 核心函数：

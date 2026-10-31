@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Mapping
 
 import httpx
 
@@ -35,6 +36,19 @@ CARD_WIDTH = 620
 CARD_OUTPUT_WIDTH = 1000
 VIDEO_WIDTH = 1000
 LOGO_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "logos"
+
+
+async def _download_with_headers(
+    url: str,
+    headers: Mapping[str, str],
+    *,
+    proxy: str | None,
+) -> Path:
+    return await download_image(
+        url,
+        headers=dict(headers) if headers else None,
+        proxy=proxy,
+    )
 
 
 def _metric_icon_name(label: str) -> IconName:
@@ -78,10 +92,10 @@ async def _local_avatar(author: Author | None, *, proxy: str | None) -> tuple[st
     path = author.avatar_path
     if path is None and author.avatar_url is not None:
         try:
-            path = (
-                await download_image(author.avatar_url, proxy=proxy)
-                if proxy
-                else await download_image(author.avatar_url)
+            path = await _download_with_headers(
+                author.avatar_url,
+                author.avatar_headers,
+                proxy=proxy,
             )
         except (httpx.HTTPError, DownloadException, OSError, ValueError):
             return author.name, None
@@ -214,7 +228,11 @@ async def _blocks(
         path = block.path
         if path is None and block.url is not None:
             try:
-                path = await download_image(block.url, proxy=proxy) if proxy else await download_image(block.url)
+                path = await _download_with_headers(
+                    block.url,
+                    block.headers,
+                    proxy=proxy,
+                )
             except (httpx.HTTPError, DownloadException, OSError, ValueError):
                 continue
         if path is None:
@@ -236,7 +254,11 @@ async def _hero_data(card: PreviewCard, *, dark: bool, proxy: str | None) -> str
     path = card.cover_path
     if path is None and card.cover_url is not None:
         try:
-            path = await download_image(card.cover_url, proxy=proxy) if proxy else await download_image(card.cover_url)
+            path = await _download_with_headers(
+                card.cover_url,
+                card.cover_headers,
+                proxy=proxy,
+            )
         except (httpx.HTTPError, DownloadException, OSError, ValueError):
             return ""
     if path is None:
@@ -254,7 +276,11 @@ async def _ambient_data(card: PreviewCard, *, proxy: str | None) -> str:
     path = card.cover_path
     if path is None and card.cover_url is not None:
         try:
-            path = await download_image(card.cover_url, proxy=proxy) if proxy else await download_image(card.cover_url)
+            path = await _download_with_headers(
+                card.cover_url,
+                card.cover_headers,
+                proxy=proxy,
+            )
         except (httpx.HTTPError, DownloadException, OSError, ValueError):
             return ""
     if path is None:
@@ -292,6 +318,7 @@ async def prepare_template_card(
     repost = await prepare_template_card(card.repost, dark=dark, proxy=proxy) if card.repost is not None else None
     blocks = await _blocks(card, proxy=proxy)
     hero_uri = await _hero_data(card, dark=dark, proxy=proxy)
+    has_content_images = any(isinstance(block, TemplateImageGroup) for block in blocks)
     common_meta = tuple(item for item in (card.timestamp, author_description) if item)
     profile_note = " · ".join(
         item for item in (author_description or "", f"用户 ID：{author_uid}" if author_uid else "") if item
@@ -310,7 +337,7 @@ async def prepare_template_card(
         source_url=card.source_url,
         hero_uri=hero_uri,
         ambient_uri=await _ambient_data(card, proxy=proxy) if dark else "",
-        show_hero=bool(hero_uri) and not blocks,
+        show_hero=bool(hero_uri) and not has_content_images,
         blocks=blocks,
         metrics=metrics,
         comments=await _comment_templates(card.comments, proxy=proxy),

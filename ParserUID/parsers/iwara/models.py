@@ -14,12 +14,21 @@ from ...utils.exceptions import ParseException
 IMAGE_HOST: Final = "i.iwara.tv"
 DEFAULT_AVATAR_URL: Final = "https://www.iwara.tv/images/default-avatar.jpg"
 QUALITY_FALLBACK: Final = ("Source", "preview", "540", "360")
+EMBED_VIDEO_HOSTS: Final = frozenset(
+    {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+        "youtu.be",
+    }
+)
 
 
 class IwaraFileRaw(Struct, frozen=True):
     id: str = ""
     name: str = ""
-    duration: float = 0.0
+    duration: float | None = None
 
 
 class IwaraAvatarRaw(Struct, frozen=True):
@@ -42,8 +51,9 @@ class IwaraVideoRaw(Struct):
     title: str = "未知标题"
     body: str | None = None
     rating: str = "general"
-    fileUrl: str = ""
-    file: IwaraFileRaw = IwaraFileRaw()
+    fileUrl: str | None = None
+    file: IwaraFileRaw | None = None
+    embedUrl: str | None = None
     user: IwaraUserRaw = IwaraUserRaw()
     tags: list[IwaraTagRaw] = []
     thumbnail: int = 0
@@ -90,8 +100,8 @@ def parse_timestamp(raw: str) -> int:
         return 0
 
 
-def video_thumbnail_url(file: IwaraFileRaw, thumbnail: int) -> str | None:
-    if not file.id:
+def video_thumbnail_url(file: IwaraFileRaw | None, thumbnail: int) -> str | None:
+    if file is None or not file.id:
         return None
     number = str(thumbnail).zfill(2)
     return f"https://{IMAGE_HOST}/image/thumbnail/{quote(file.id, safe='')}/thumbnail-{number}.jpg"
@@ -131,3 +141,9 @@ def is_iwara_url(url: str) -> bool:
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     return parsed.scheme == "https" and (host == "iwara.tv" or host.endswith(".iwara.tv"))
+
+
+def is_supported_embed_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and host in EMBED_VIDEO_HOSTS

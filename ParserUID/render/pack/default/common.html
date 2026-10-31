@@ -83,7 +83,7 @@
         </div>
     </div>
     <div class="body">
-        <div class="title">{{ card.title }}</div>
+        {% if card.title %}<div class="title">{{ card.title }}</div>{% endif %}
         {% if card.text %}<div class="copy">{{ card.text }}</div>{% endif %}
         {{ render_hero(card) }}
         {{ render_body(card.blocks) }}

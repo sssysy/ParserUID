@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from dataclasses import dataclass
-from collections.abc import Sequence
+from dataclasses import field, dataclass
+from collections.abc import Mapping, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +22,7 @@ class Author:
     uid: str | None = None
     avatar_path: Path | None = None
     avatar_url: str | None = None
+    avatar_headers: Mapping[str, str] = field(default_factory=dict)
     metrics: tuple[Metric, ...] = ()
 
 
@@ -32,6 +33,7 @@ class ImageBlock:
     path: Path | None = None
     url: str | None = None
     caption: str | None = None
+    headers: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if (self.path is None) == (self.url is None):
@@ -87,6 +89,7 @@ class PreviewCard:
     source_url: str | None = None
     cover_path: Path | None = None
     cover_url: str | None = None
+    cover_headers: Mapping[str, str] = field(default_factory=dict)
     blocks: tuple[CardBlock, ...] = ()
     metrics: tuple[Metric, ...] = ()
     comments: tuple[Comment, ...] = ()

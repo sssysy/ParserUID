@@ -139,15 +139,15 @@ data/ParserUID/thirdparty/parsers/<name>/
   - 需要绕过 Cloudflare / TLS 指纹反爬的平台（小红书、知乎、小黑盒、iwara 等）调用 `await self.get_curl_client()` 获取 `curl_cffi.requests.AsyncSession`。
   - UA 由各平台解析器在自己的包内按需定义私有常量，框架不硬编码全局 UA。
 - **通用下载器**：
-  - 统一调用 `self.downloader`（基于 `ParserUID.utils.downloader.Downloader`）。
+  - 统一调用 `self.downloader`（基于 `...utils.downloader` 中的 `Downloader`）。
   - 所有媒体文件统一落盘到插件数据缓存目录：`data/ParserUID/cache`。
   - 支持分块流式下载、断点续传、超时重试、大小上限拦截（`max_bytes`）与 URL SHA256 去重缓存。
   - 视频平台（YouTube、Twitter、TikTok 等）流媒体提取通过 `self.downloader.download_with_ytdlp` 异步执行。
 - **FFmpeg 工具链**：
-  - 音视频分离合并调用 `ParserUID.utils.ffmpeg.merge_av`。
-  - 实况照片与首图合成调用 `ParserUID.utils.ffmpeg.merge_to_live_mp4`。
+  - 音视频分离合并调用 `...utils.ffmpeg` 中的 `merge_av`。
+  - 实况照片与首图合成调用 `...utils.ffmpeg` 中的 `merge_to_live_mp4`。
 - **公共工具**：
-  - 跨平台通用函数统一使用 `ParserUID.utils.utils`（如 `LimitedSizeDict`、`generate_file_name`、`fmt_size`、`format_num`、`extract_json_url`）。
+  - 跨平台通用函数统一使用 `...utils.utils`（如 `LimitedSizeDict`、`generate_file_name`、`fmt_size`、`format_num`、`extract_json_url`）。
 
 ## 代码规范与绝对红线
 
@@ -165,6 +165,12 @@ data/ParserUID/thirdparty/parsers/<name>/
    - 逻辑漏洞与类型错误必须从代码本身修复，仅外部不可信输入解析处允许按需保留。
 5. **注释限制**：
    - `#` 注释最多两行，每行不超过 88 个字符，一句话点明为什么或有什么坑，不翻译代码。
+6. **相对导入**：
+   - ParserUID 自身生产代码和内置解析器必须使用相对导入，禁止
+     `from ParserUID.xxx import ...` 或 `import ParserUID.xxx`。
+   - `ParserUID/parsers/<name>/` 内的模块按层级使用 `from ..base import ...`、
+     `from ...utils.models import ...` 等写法；`gsuid_core` 等外部依赖仍使用绝对导入。
+   - 第三方解析器不要求相对导入，按其实际加载命名空间和兼容接口选择导入方式。
 
 ## 验证
 
