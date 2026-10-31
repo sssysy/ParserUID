@@ -11,7 +11,10 @@ from pathlib import Path
 
 import pytest
 
+from gsuid_core.bot import Bot, _Bot
+from ParserUID.parser import ParserRuntime
 from ParserUID.sender import ContentItem
+from gsuid_core.models import Event
 from ParserUID.parsers.base import BaseParser, handle
 from ParserUID.utils.models import Platform, TextContent, ImageContent
 from ParserUID.parsers.config import (
@@ -39,6 +42,18 @@ class DummySampleParser(BaseParser):
                 self.create_image_content(path=Path("/tmp/fake.png")),
             ]
         )
+
+
+class PropertyBackedParser(BaseParser):
+    platform: ClassVar[Platform] = Platform(name="property_test", display_name="属性测试")
+
+    @property
+    def client(self) -> object:
+        raise AssertionError("处理器发现不得执行 property")
+
+    @handle("property.example/video/", r"property\.example/video/(?P<id>\d+)")
+    async def parse_video(self, searched: re.Match[str]) -> list[ContentItem]:
+        return [self.create_text_content(searched.group("id"))]
 
 
 def test_parser_manifest_validation() -> None:
@@ -147,6 +162,98 @@ def test_registry_snapshot_matching() -> None:
 
     no_match = snapshot.match("https://other.com/post/1")
     assert no_match is None
+
+
+@pytest.mark.anyio
+async def test_dispatch_logs_parser_hit_without_full_url(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    parser = DummySampleParser()
+    pattern = dict(parser.get_registered_specs())["dummy.com/video/"]
+    snapshot = RegistrySnapshot(
+        parsers={"dummy": parser},
+        rules=[("dummy.com/video/", pattern, parser)],
+    )
+    runtime = ParserRuntime(snapshot)
+    matched = snapshot.match("https://dummy.com/video/12345")
+    assert matched is not None
+    monkeypatch.setattr(parser, "parse", lambda *_args, **_kwargs: [])
+
+    event = Event(
+        bot_id="bot",
+        user_id="user",
+        group_id="group",
+        msg_id="message",
+        raw_text="https://dummy.com/video/12345?secret=value",
+    )
+    bot = Bot(_Bot("bot"), event)
+
+    with caplog.at_level("INFO", logger="GsCore"):
+        try:
+            assert await runtime.dispatch(bot, event) is True
+        finally:
+            await runtime.close()
+
+    assert any(
+        "链接命中，开始解析" in record.message
+        and "parser=dummy.com/video/" in record.message
+        and "host=dummy.com" in record.message
+        for record in caplog.records
+    )
+    assert all("secret=value" not in record.message for record in caplog.records)
+
+
+def test_handler_discovery_does_not_evaluate_properties() -> None:
+    parser = PropertyBackedParser()
+
+    assert list(parser._handlers) == ["property.example/video/"]
+
+
+@pytest.mark.anyio
+async def test_registry_enables_property_backed_parser(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builtin_parsers = tmp_path / "builtin"
+    thirdparty_parsers = tmp_path / "thirdparty"
+    user_configs = tmp_path / "user_configs"
+    builtin_parsers.mkdir()
+    thirdparty_parsers.mkdir()
+    user_configs.mkdir()
+
+    site_dir = builtin_parsers / "property_test"
+    site_dir.mkdir()
+    (site_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "name": "property_test",
+                "display_name": "属性测试",
+                "default_enabled": False,
+                "fields": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (site_dir / "__init__.py").write_text(
+        "from tests.test_parser_foundation import PropertyBackedParser\nPARSER = PropertyBackedParser\n",
+        encoding="utf-8",
+    )
+    (user_configs / "property_test.json").write_text(
+        json.dumps({"schema_version": 1, "enabled": True, "values": {}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("ParserUID.utils.registry.get_builtin_parsers_dir", lambda: builtin_parsers)
+    monkeypatch.setattr("ParserUID.utils.registry.get_thirdparty_parsers_dir", lambda: thirdparty_parsers)
+    monkeypatch.setattr("ParserUID.parsers.config.get_user_config_path", lambda name: user_configs / f"{name}.json")
+
+    snapshot = await load_registry()
+    matched = snapshot.match("https://property.example/video/42")
+    await snapshot.close()
+
+    assert matched is not None
+    assert matched.searched.group("id") == "42"
 
 
 @pytest.mark.anyio

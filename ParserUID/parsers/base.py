@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from types import FunctionType
 from typing import Literal, ClassVar
 from pathlib import Path
 from contextvars import ContextVar
@@ -103,20 +104,23 @@ class BaseParser:
         return proxy_url()
 
     def _collect_handlers(self) -> None:
-        for attr_name in dir(self):
-            if attr_name.startswith("_BaseParser__"):
-                continue
-            attr = getattr(self, attr_name)
-            if not callable(attr):
-                continue
-            specs = getattr(attr, _HANDLER_SPECS_ATTR, None)
-            if not isinstance(specs, list):
-                continue
-            for item in specs:
-                if isinstance(item, tuple) and len(item) == 2:
-                    keyword, pattern = item
-                    if isinstance(keyword, str) and isinstance(pattern, re.Pattern):
-                        self._handlers[keyword] = (pattern, attr)
+        seen_names: set[str] = set()
+        for parser_type in type(self).__mro__:
+            for attr_name, attr in vars(parser_type).items():
+                if attr_name in seen_names or attr_name.startswith("_BaseParser__"):
+                    continue
+                seen_names.add(attr_name)
+                if not isinstance(attr, FunctionType):
+                    continue
+                specs = attr.__dict__.get(_HANDLER_SPECS_ATTR)
+                if not isinstance(specs, list):
+                    continue
+                handler = attr.__get__(self, type(self))
+                for item in specs:
+                    if isinstance(item, tuple) and len(item) == 2:
+                        keyword, pattern = item
+                        if isinstance(keyword, str) and isinstance(pattern, re.Pattern):
+                            self._handlers[keyword] = (pattern, handler)
 
     @classmethod
     def get_registered_specs(cls) -> list[tuple[str, re.Pattern[str]]]:

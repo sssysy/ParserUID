@@ -320,6 +320,10 @@ class ParserRuntime:
             logger.debug(f"[Parser·编排] 链接防抖命中 | parser={matched.keyword}")
             return False
 
+        logger.info(
+            f"[Parser·解析] 链接命中，开始解析 | parser={matched.keyword} | "
+            f"host={urlsplit(normalized_url).hostname or 'unknown'}"
+        )
         task = asyncio.create_task(
             self._run_selected(bot, ev, matched),
             name=f"ParserUID:{matched.keyword}",

@@ -130,8 +130,8 @@ class ZhihuParser(BaseParser):
     HOMEPAGE: ClassVar[str] = "https://www.zhihu.com/"
 
     def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)
         self._client_instance: ZhihuClient | None = None
+        super().__init__(*args, **kwargs)
 
     @property
     def client(self) -> ZhihuClient:

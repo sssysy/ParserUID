@@ -202,8 +202,9 @@ async def load_registry() -> RegistrySnapshot:
             try:
                 instance = parser_cls(config=user_config)
             except Exception as exc:
+                detail = f" | attribute={exc.name}" if isinstance(exc, AttributeError) and exc.name else ""
                 logger.warning(
-                    f"[Parser·注册] 实例化失败被跳过 | name={child.name} | error={type(exc).__name__}",
+                    f"[Parser·注册] 实例化失败被跳过 | name={child.name} | error={type(exc).__name__}{detail}",
                 )
                 continue
             active_parsers[child.name] = instance
