@@ -67,3 +67,13 @@ class JmAsyncClientProtocol(Protocol):
     ) -> Sequence[JmCommentEntity]: ...
     async def __aenter__(self) -> JmAsyncClientProtocol: ...
     async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None: ...
+
+
+@runtime_checkable
+class JmOptionProtocol(Protocol):
+    def new_jm_async_client(
+        self,
+        *,
+        proxies: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> JmAsyncClientProtocol: ...

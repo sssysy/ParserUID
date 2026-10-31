@@ -13,7 +13,7 @@ from PIL import Image, ImageFilter
 from gsuid_core.logger import logger
 
 from ..base import BaseParser, handle
-from .models import JmPhotoItem, JmPhotoDetail, JmAsyncClientProtocol
+from .models import JmPhotoItem, JmPhotoDetail, JmOptionProtocol, JmAsyncClientProtocol
 from .comment import comment_limit, decode_comments
 from ...sender import ContentItem
 from ...utils.models import Platform
@@ -38,36 +38,27 @@ except ImportError:
     MissingAlbumPhotoException = Exception
 
 
-def _option_client(option: object) -> dict[str, object]:
-    """取得 jmcomic 选项中的 HTTP 客户端配置字典。"""
-    if not hasattr(option, "client"):
-        raise ParseException("当前 jmcomic 选项结构不支持代理配置")
-    client = option.client
-    if not isinstance(client, dict):
-        raise ParseException("当前 jmcomic 选项结构不支持代理配置")
-    return client
-
-
 class JMComicParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name="jmcomic", display_name="jmcomic")
     IMAGE_CONCURRENCY: ClassVar[int] = 16
 
-    def _get_option(self) -> object:
+    def _get_option(self) -> JmOptionProtocol:
         if JmOption is None:
             raise ParseException("未安装 jmcomic 依赖库，请先安装后重载插件")
         option = JmOption.default()
-        client = _option_client(option)
-        proxy = self.proxy
-        if proxy:
-            postman = client.setdefault("postman", {})
-            meta = postman.setdefault("meta_data", {})
-            meta["proxies"] = {"https": proxy, "http": proxy}
-        cookie = self.get_config_value("cookie")
-        if cookie:
-            postman = client.setdefault("postman", {})
-            meta = postman.setdefault("meta_data", {})
-            meta["headers"] = {"Cookie": cookie}
+        if not isinstance(option, JmOptionProtocol):
+            raise ParseException("当前 jmcomic 版本不支持异步客户端")
         return option
+
+    def _client_options(
+        self,
+    ) -> tuple[dict[str, str] | None, dict[str, str] | None]:
+        """将插件代理和 Cookie 传给 jmcomic 异步客户端工厂。"""
+        proxy = self.proxy
+        proxies = {"https": proxy, "http": proxy} if proxy else None
+        cookie = self.get_config_value("cookie").strip()
+        headers = {"Cookie": cookie} if cookie else None
+        return proxies, headers
 
     @staticmethod
     def _blur(image_path: Path, radius: int = 5) -> Path:
@@ -130,7 +121,9 @@ class JMComicParser(BaseParser):
                         raw_path,
                     )
                 except Exception as exc:
-                    logger.warning(f"[JMComic] 图片下载或解密失败 | error={exc}")
+                    logger.warning(
+                        f"[Parser·JMComic] 图片下载或解密失败 | error_type={type(exc).__name__}",
+                    )
                     return None
 
         results = await asyncio.gather(*(download_and_decode(photo) for photo in photo_detail))
@@ -138,15 +131,31 @@ class JMComicParser(BaseParser):
 
     async def _build_pdf(
         self,
-        image_paths: asyncio.Task[list[Path]],
+        image_paths: Sequence[Path],
         comic_id: str,
     ) -> Path:
-        paths = await image_paths
-        if not paths:
+        if not image_paths:
             raise ParseException("漫画图片下载失败，未能获取到任何有效图片")
         pdf_path = self.downloader.cache_dir / f"{comic_id}.pdf"
-        await asyncio.to_thread(self._imgs_to_pdf, paths, pdf_path)
+        await asyncio.to_thread(self._imgs_to_pdf, image_paths, pdf_path)
         return pdf_path
+
+    async def _load_pdf(
+        self,
+        photo_detail: JmPhotoDetail,
+        comic_id: str,
+    ) -> Path:
+        image_paths = await self._download_all_photo(photo_detail)
+        return await self._build_pdf(image_paths, comic_id)
+
+    async def _load_photo(self, photo: JmPhotoItem) -> Path:
+        raw_path = await self.downloader.download_image(photo.img_url, proxy=self.proxy)
+        return await asyncio.to_thread(
+            self._decode_img,
+            photo.img_url,
+            photo.scramble_id,
+            raw_path,
+        )
 
     async def _fetch_comments(self, jm_client: JmAsyncClientProtocol, comic_id: str) -> tuple[Comment, ...]:
         include = self.get_config_value("include_comments", "true").lower() == "true"
@@ -162,7 +171,9 @@ class JMComicParser(BaseParser):
                 need_total=False,
             )
         except Exception as exc:
-            logger.warning(f"[JMComic] 获取评论失败 | comic_id={comic_id} | error={exc}")
+            logger.warning(
+                f"[Parser·JMComic] 获取评论失败 | comic_id={comic_id} | error_type={type(exc).__name__}",
+            )
             return ()
         return decode_comments(page, limit=limit)
 
@@ -182,10 +193,8 @@ class JMComicParser(BaseParser):
             return ()
 
         option = self._get_option()
-        if not hasattr(option, "new_jm_async_client"):
-            raise ParseException("当前 jmcomic 版本不支持异步客户端")
-        client_factory = getattr(option, "new_jm_async_client")
-        client_ctx = client_factory()
+        proxies, headers = self._client_options()
+        client_ctx = option.new_jm_async_client(proxies=proxies, headers=headers)
 
         async with client_ctx as jm_client:
             try:
@@ -237,6 +246,7 @@ class JMComicParser(BaseParser):
                 extra_info += "\n若需解析其他章节请发送对应章节jm号。"
 
             send_mode = self.get_config_value("image_send_mode", "pdf")
+            download_photos = False
             if send_mode != "ignore":
                 page_count = len(photo_detail)
                 try:
@@ -246,15 +256,7 @@ class JMComicParser(BaseParser):
                 if max_page and page_count > max_page:
                     extra_info += f"\n当前漫画页数 {page_count}，超过最大页数 {max_page}，跳过下载。"
                 else:
-                    image_paths = asyncio.create_task(self._download_all_photo(photo_detail))
-                    if send_mode == "pdf":
-                        pdf_task = asyncio.create_task(self._build_pdf(image_paths, comic_id))
-                        final_contents.append(self.create_file_content(loader=lambda: pdf_task))
-                    elif send_mode == "merge":
-                        downloaded = await image_paths
-                        if not downloaded:
-                            raise ParseException("漫画图片下载失败，未能获取到任何有效图片")
-                        final_contents.extend(self.create_image_content(path=path) for path in downloaded)
+                    download_photos = True
 
             await self.send_info(
                 title=album_name or album_title,
@@ -267,4 +269,15 @@ class JMComicParser(BaseParser):
                 comments=comments,
                 url=album_url,
             )
+
+            if download_photos and send_mode == "pdf":
+                final_contents.append(
+                    self.create_file_content(loader=lambda: self._load_pdf(photo_detail, comic_id)),
+                )
+            elif download_photos and send_mode == "merge":
+                for photo in photo_detail:
+                    content = self.create_image_content(
+                        loader=lambda photo=photo: self._load_photo(photo),
+                    )
+                    final_contents.append(content)
             return self.result(final_contents)
