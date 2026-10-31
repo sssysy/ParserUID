@@ -107,12 +107,15 @@ class Downloader:
         candidates = [url, *(fallback_urls or ())]
         last_error: Exception | None = None
 
-        for candidate_url in candidates:
+        for attempt, candidate_url in enumerate(candidates, start=1):
             try:
                 return await self._stream_download(candidate_url, target, headers, proxy, max_bytes)
             except Exception as exc:
                 last_error = exc
-                logger.warning(f"[下载] 链接下载失败，尝试备用地址：{candidate_url} | {exc}")
+                logger.warning(
+                    f"[Parser·下载] 地址下载失败 | host={urlparse(candidate_url).hostname or 'unknown'} "
+                    f"| attempt={attempt}/{len(candidates)} | error_type={type(exc).__name__}"
+                )
 
         raise DownloadException(f"文件下载失败（尝试了 {len(candidates)} 个地址）：{last_error}")
 

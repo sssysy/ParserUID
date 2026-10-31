@@ -364,6 +364,7 @@ class DouYinParser(BaseParser):
             raise ParseException("抖音分享页数据异常") from exc
 
     def _build_contents(self, aweme: Aweme, selected, duration: float) -> list[MediaContent]:
+        headers = self._get_headers()
         if aweme.is_video and selected is not None:
             primary_url = selected.url
             fallback_urls = selected.fallback_urls
@@ -372,6 +373,7 @@ class DouYinParser(BaseParser):
                     primary_url,
                     cover=None,
                     duration=duration,
+                    headers=headers,
                     proxy=self.proxy,
                     fallback_urls=fallback_urls,
                 )
@@ -379,7 +381,6 @@ class DouYinParser(BaseParser):
 
         if aweme.images:
             items: list[MediaContent] = []
-            headers = self._get_headers()
             for image in aweme.images:
                 if image.clip_type in (2, None) and image.url_list:
                     items.extend(self.create_image_contents([image.url_list[0]], headers=headers, proxy=self.proxy))
