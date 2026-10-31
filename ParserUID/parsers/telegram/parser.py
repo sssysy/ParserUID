@@ -295,12 +295,7 @@ class TelegramParser(BaseParser):
 
     @staticmethod
     def _description_text(post: TelegramPost) -> str:
-        parts: list[str] = [post.text] if post.text else []
-        if post.reply is not None:
-            reply_text = _short(post.reply.text)
-            if reply_text:
-                parts.append(f"回复 {post.reply.name}：\n{reply_text}")
-        return "\n\n".join(parts)
+        return post.text or ""
 
     def _extra(self, post: TelegramPost) -> str | None:
         sections: list[str] = []

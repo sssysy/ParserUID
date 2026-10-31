@@ -164,7 +164,7 @@ async def send_parse_result(
 
     if should_merge:
         logger.info(f"[Parser·发送] 使用合并转发 | count={len(contents)}")
-        return await _send(bot, MessageSegment.node(segments))
+        return await _send(bot, [MessageSegment.node([segment]) for segment in segments])
 
     return await _send(bot, segments)
 

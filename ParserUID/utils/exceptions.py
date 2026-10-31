@@ -31,5 +31,9 @@ class NetworkException(ParseException):
     """外部 API 或媒体资源网络请求异常。"""
 
 
+class RegionRestrictedException(ParseException):
+    """内容受地区或版权限制，向用户展示明确原因。"""
+
+
 class DownloadException(ParseException):
     """通用多媒体下载异常。"""

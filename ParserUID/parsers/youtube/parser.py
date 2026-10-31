@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import asyncio
-from typing import ClassVar
+from typing import Final, ClassVar
 from pathlib import Path
 
 from gsuid_core.logger import logger
@@ -21,7 +21,15 @@ from .cookie import YouTubeCookieFile
 from .models import VideoData, decode_video
 from ...utils.models import Platform, MediaContent
 from ...render.models import Author
-from ...utils.exceptions import ParseException
+from ...utils.exceptions import ParseException, RegionRestrictedException
+
+_REGION_RESTRICTED_MARKERS: Final = (
+    "not available in your country",
+    "blocked it in your country",
+    "geo restricted",
+    "blocked due to the claimed content",
+)
+_REGION_RESTRICTED_MESSAGE: Final = "该视频受版权或地区限制，当前网络地区无法观看"
 
 
 class YouTubeParser(BaseParser):
@@ -153,6 +161,8 @@ class YouTubeParser(BaseParser):
             return await asyncio.to_thread(_sync_extract)
         except Exception as exc:
             logger.warning(f"[YouTube] 元数据获取失败 | error={exc}")
+            if _is_region_restricted(exc):
+                raise RegionRestrictedException(_REGION_RESTRICTED_MESSAGE) from exc
             raise ParseException(f"YouTube 视频信息获取失败：{exc}") from exc
 
     async def _download_video(self, url: str, clip: int | None) -> Path:
@@ -177,6 +187,8 @@ class YouTubeParser(BaseParser):
             )
         except Exception as exc:
             logger.warning(f"[YouTube] 视频下载失败 | error={exc}")
+            if _is_region_restricted(exc):
+                raise RegionRestrictedException(_REGION_RESTRICTED_MESSAGE) from exc
             raise ParseException(f"YouTube 视频下载失败：{exc}") from exc
 
     async def _download_audio(self, url: str) -> Path:
@@ -195,6 +207,8 @@ class YouTubeParser(BaseParser):
             )
         except Exception as exc:
             logger.warning(f"[YouTube] 音频下载失败 | error={exc}")
+            if _is_region_restricted(exc):
+                raise RegionRestrictedException(_REGION_RESTRICTED_MESSAGE) from exc
             raise ParseException(f"YouTube 音频下载失败：{exc}") from exc
 
     async def _cookiefile(self) -> Path | None:
@@ -260,3 +274,9 @@ class YouTubeParser(BaseParser):
         desc_val = channel.get("description")
         desc = str(desc_val) if isinstance(desc_val, str) else None
         return (avatar_urls[-1] if avatar_urls else None, desc)
+
+
+def _is_region_restricted(exc: Exception) -> bool:
+    """按 yt-dlp 的受限提示识别地区或版权拦截。"""
+    message = str(exc).lower()
+    return any(marker in message for marker in _REGION_RESTRICTED_MARKERS)

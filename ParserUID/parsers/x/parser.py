@@ -27,64 +27,8 @@ from ...utils.exceptions import ParseException
 V2_BEARER = (
     "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 )
-GUEST_ACTIVATE_URL = "https://api.x.com/1.1/guest/activate.json"
-TWEET_RESULT_URL = "https://x.com/i/api/graphql/zJ3egAtr_fUlaMQbkWJy5A/TweetResultByRestId"
+SYNDICATION_TWEET_URL = "https://cdn.syndication.twimg.com/tweet-result"
 TRANSLATION_URL = "https://x.com/i/api/1.1/strato/column/None/translation.json"
-X_FEATURES = (
-    '{"creator_subscriptions_tweet_preview_api_enabled":true,'
-    '"premium_content_api_read_enabled":false,'
-    '"communities_web_enable_tweet_community_results_fetch":true,'
-    '"c9s_tweet_anatomy_moderator_badge_enabled":true,'
-    '"responsive_web_grok_analyze_button_fetch_trends_enabled":false,'
-    '"responsive_web_grok_analyze_post_followups_enabled":true,'
-    '"rweb_cashtags_composer_attachment_enabled":true,'
-    '"responsive_web_jetfuel_frame":true,'
-    '"rweb_sports_post_context_enabled":true,'
-    '"responsive_web_grok_share_attachment_enabled":true,'
-    '"responsive_web_grok_annotations_enabled":true,'
-    '"articles_preview_enabled":true,'
-    '"responsive_web_edit_tweet_api_enabled":true,'
-    '"rweb_conversational_replies_downvote_enabled":false,'
-    '"graphql_is_translatable_rweb_tweet_is_translatable_enabled":true,'
-    '"view_counts_everywhere_api_enabled":true,'
-    '"longform_notetweets_consumption_enabled":true,'
-    '"responsive_web_twitter_article_tweet_consumption_enabled":true,'
-    '"content_disclosure_indicator_enabled":true,'
-    '"content_disclosure_ai_generated_indicator_enabled":true,'
-    '"responsive_web_grok_show_grok_translated_post":true,'
-    '"responsive_web_grok_analysis_button_from_backend":true,'
-    '"post_ctas_fetch_enabled":false,'
-    '"rweb_cashtags_enabled":true,'
-    '"freedom_of_speech_not_reach_fetch_enabled":true,'
-    '"standardized_nudges_misinfo":true,'
-    '"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled":true,'
-    '"longform_notetweets_rich_text_read_enabled":true,'
-    '"longform_notetweets_inline_media_enabled":false,'
-    '"profile_label_improvements_pcf_label_in_post_enabled":true,'
-    '"responsive_web_profile_redirect_enabled":true,'
-    '"rweb_tipjar_consumption_enabled":false,'
-    '"verified_phone_label_enabled":false,'
-    '"responsive_web_nested_quote_preview_enabled":false,'
-    '"responsive_web_grok_image_annotation_enabled":true,'
-    '"responsive_web_grok_imagine_annotation_enabled":true,'
-    '"responsive_web_grok_community_note_auto_translation_is_enabled":true,'
-    '"responsive_web_graphql_timeline_navigation_enabled":true}'
-)
-X_FIELD_TOGGLES = (
-    '{"withArticleRichContentState":true,'
-    '"withArticlePlainText":false,'
-    '"withArticleSummaryText":true,'
-    '"withArticleVoiceOver":true}'
-)
-X_GRAPHQL_VARIABLES: dict[str, object] = {
-    "tweetId": "",
-    "includePromotedContent": True,
-    "withBirdwatchNotes": True,
-    "withVoice": True,
-    "withCommunity": True,
-    "withV2Timeline": True,
-    "withQuickPromoteEligibilityTweetFields": True,
-}
 NON_LINGUISTIC_LANGS = frozenset({"qme", "qst", "zxx"})
 STATUS_PATTERN = (
     r"(?<![A-Za-z0-9.-])(?<![/.])https?://(?:(?:www|mobile)\.)?{host}/"
@@ -126,14 +70,8 @@ def _resolution(media: object) -> str | None:
 
 class XParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name="x", display_name="X")
-    guest_token_ttl: ClassVar[float] = 2 * 60 * 60
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)
-        self._guest_token: str | None = None
-        self._guest_token_created: float = 0.0
-
-    def _api_headers(self, *, auth: bool = True) -> dict[str, str]:
+    def _api_headers(self) -> dict[str, str]:
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
@@ -147,15 +85,14 @@ class XParser(BaseParser):
             headers["Cookie"] = cookie
             if "auth_token=" in cookie:
                 headers["x-twitter-auth-type"] = "OAuth2Session"
-        if auth:
-            csrf = uuid.uuid4().hex
-            headers.update(
-                {
-                    "x-twitter-active-user": "yes",
-                    "x-twitter-client-language": "zh-cn",
-                    "x-csrf-token": csrf,
-                }
-            )
+        csrf = uuid.uuid4().hex
+        headers.update(
+            {
+                "x-twitter-active-user": "yes",
+                "x-twitter-client-language": "zh-cn",
+                "x-csrf-token": csrf,
+            }
+        )
         return headers
 
     def _media_headers(self) -> dict[str, str]:
@@ -168,52 +105,28 @@ class XParser(BaseParser):
             headers["Cookie"] = cookie
         return headers
 
-    async def _ensure_guest_token(self) -> str:
-        now = asyncio.get_running_loop().time()
-        if self._guest_token and now - self._guest_token_created < self.guest_token_ttl:
-            return self._guest_token
-        try:
-            client = await self.get_client()
-            response = await client.post(
-                GUEST_ACTIVATE_URL,
-                headers=self._api_headers(auth=False),
-            )
-            if response.status_code >= 400:
-                raise ParseException(_safe_error_text(response.status_code, response.reason_phrase or ""))
-            body = response.content
-        except (httpx.HTTPError, TimeoutError) as exc:
-            raise ParseException("获取 X 访客凭证失败") from exc
-        try:
-            payload = msgspec.json.decode(body)
-            token = payload.get("guest_token") if isinstance(payload, dict) else None
-            if not isinstance(token, str) or not token:
-                raise ValueError("guest token missing")
-        except (msgspec.DecodeError, ValueError, AttributeError) as exc:
-            raise ParseException("X 访客凭证格式异常") from exc
-        self._guest_token = token
-        self._guest_token_created = now
-        return token
-
     async def _request_tweet(self, tweet_id: str) -> dict[str, object]:
-        headers = self._api_headers()
-        if "auth_token=" not in headers.get("Cookie", ""):
-            headers["x-guest-token"] = await self._ensure_guest_token()
+        headers = {
+            "Accept": "application/json",
+            "Referer": "https://platform.twitter.com/",
+        }
         params = {
-            "variables": msgspec.json.encode({**X_GRAPHQL_VARIABLES, "tweetId": tweet_id}).decode(),
-            "features": X_FEATURES,
-            "fieldToggles": X_FIELD_TOGGLES,
+            "id": tweet_id,
+            "lang": "en",
+            "token": uuid.uuid4().hex,
         }
         client = await self.get_client()
         retries = 2
         for attempt in range(retries + 1):
             try:
                 response = await client.get(
-                    TWEET_RESULT_URL,
+                    SYNDICATION_TWEET_URL,
                     params=params,
                     headers=headers,
                 )
-                if response.status_code == 403 and attempt == 0:
-                    self._guest_token = None
+                if response.status_code in {429, 500, 502, 503, 504} and attempt < retries:
+                    await asyncio.sleep(1 + attempt)
+                    continue
                 if response.status_code >= 400:
                     raise ParseException(_safe_error_text(response.status_code, response.reason_phrase or ""))
                 payload = msgspec.json.decode(response.content)
@@ -222,11 +135,9 @@ class XParser(BaseParser):
                 return {str(k): v for k, v in payload.items()}
             except ParseException:
                 raise
-            except Exception as exc:
+            except (httpx.HTTPError, msgspec.DecodeError, TimeoutError) as exc:
                 if attempt < retries:
                     await asyncio.sleep(1 + attempt)
-                    if "403" in str(exc):
-                        headers["x-guest-token"] = await self._ensure_guest_token()
                     continue
                 raise ParseException("获取 X 帖子详情失败") from exc
         raise ParseException("获取 X 帖子详情失败")

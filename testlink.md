@@ -14,20 +14,20 @@
 ## 视频
 - [x] https://www.bilibili.com/video/BV1YjxF6QEKE/
 
-## 引用动态 | 引用动态无图
+## 引用动态
 - [x] https://t.bilibili.com/1265260810961158163
 
 ## 动态
 - [x] https://www.bilibili.com/opus/1265244631853957170
 
-## 专栏 | 缺头图
-- [ ] https://www.bilibili.com/opus/1261426740893319168
+## 专栏
+- [x] https://www.bilibili.com/opus/1261426740893319168
 
-## 图文混排专栏 | 图文无序
-- [ ] https://www.bilibili.com/opus/1260839189400780819
+## 图文混排专栏
+- [x] https://www.bilibili.com/opus/1260839189400780819
 
-# 磁力链接 | 无预览缩略图
-- [ ] magnet:?xt=urn:btih:35f44f6f33d939125dbe42c24f76127a6f0cf3f7
+# 磁力链接
+- [x] magnet:?xt=urn:btih:35f44f6f33d939125dbe42c24f76127a6f0cf3f7
 
 # 抖音
 
@@ -99,7 +99,7 @@
 ## 回答
 - [x] https://www.zhihu.com/question/2098940094346433079/answer/2099831118455481183
 
-# AcFun
+# AcFun | 暂不实现，能解决欢迎pr
 
 ## 视频 | 
 - [ ] https://www.acfun.cn/v/ac48934093
@@ -123,7 +123,7 @@
 # jmcomic
 
 ## 漫画
-- [ ] 解析失败董卓
+- [x] 董卓能解析出来
 
 # NGA
 

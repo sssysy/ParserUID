@@ -24,6 +24,7 @@ from .config import (
     is_session_enabled,
     set_session_enabled,
 )
+from .utils.exceptions import RegionRestrictedException
 
 
 class Description(Protocol):
@@ -367,6 +368,9 @@ class ParserRuntime:
         except TimeoutError:
             logger.warning(f"[Parser·解析] 超时 | parser={matched.keyword}")
             await self._notify_error(bot, "解析超时，请稍后再试")
+        except RegionRestrictedException as exc:
+            logger.warning(f"[Parser·解析] 地区或版权限制 | parser={matched.keyword}")
+            await self._notify_error(bot, exc.message)
         except Exception as exc:
             logger.error(
                 f"[Parser·解析] 失败 | parser={matched.keyword} | error_type={type(exc).__name__}",

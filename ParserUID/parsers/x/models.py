@@ -539,6 +539,90 @@ def _metric_counts(tweet: dict[str, object]) -> tuple[int, int, int, int, int, i
     )
 
 
+def _syndication_timestamp(value: object) -> int:
+    text = _string(value)
+    if not text:
+        return 0
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    return int(parsed.timestamp())
+
+
+def _syndication_author(tweet: dict[str, object]) -> XAuthor:
+    user = _dict(tweet.get("user"))
+    avatar_url = _original_image_url(_string(user.get("profile_image_url_https")))
+    return XAuthor(
+        name=_string(user.get("name")) or "X 用户",
+        screen_name=_string(user.get("screen_name")),
+        uid=_string(user.get("id_str")),
+        avatar_url=avatar_url.replace("_normal", "_bigger"),
+        description=_string(user.get("description")),
+    )
+
+
+def _syndication_media(tweet: dict[str, object]) -> tuple[XMedia, ...]:
+    raw = _list(tweet.get("mediaDetails"))
+    if not raw:
+        raw = [{**_dict(item), "type": "photo"} for item in _list(tweet.get("photos")) if isinstance(item, dict)]
+    result: list[XMedia] = []
+    seen: set[str] = set()
+    for item in raw:
+        media = _media(_dict(item))
+        if media is None:
+            continue
+        key = media.source_url or media.cover_url
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(media)
+    return tuple(result)
+
+
+def _syndication_nested(tweet: dict[str, object]) -> XTweet | None:
+    value = tweet.get("quoted_tweet") or tweet.get("retweeted_tweet")
+    if not isinstance(value, dict):
+        return None
+    return decode_syndication_tweet(value)
+
+
+def decode_syndication_tweet(value: dict[str, object]) -> XTweet:
+    """将 X 公开嵌入响应转换为共享 XTweet 模型。"""
+    text = _note_text(value) or _clean_text(_string(value.get("text")))
+    article_blocks, article_title, article_cover = _article_blocks(value)
+    author = _syndication_author(value)
+    rest_id = _string(value.get("id_str"))
+    translated, translated_lang = _translation(value)
+    video = _dict(value.get("video"))
+    views = _count(_dict(value.get("views")).get("count")) or _count(video.get("viewCount"))
+    reply_count = _count(value.get("reply_count")) or _count(value.get("conversation_count"))
+    return XTweet(
+        rest_id=rest_id,
+        author=author,
+        text=text,
+        lang=_string(value.get("lang")),
+        timestamp=_syndication_timestamp(value.get("created_at")),
+        source_url=(f"https://x.com/{author.screen_name}/status/{rest_id}" if author.screen_name and rest_id else ""),
+        media=_syndication_media(value),
+        title=article_title,
+        article_cover_url=article_cover,
+        article_blocks=article_blocks,
+        card=_link_card(value),
+        poll=_poll(value),
+        quoted=_syndication_nested(value),
+        possibly_sensitive=bool(value.get("possibly_sensitive")),
+        view_count=views,
+        like_count=_count(value.get("favorite_count")),
+        reply_count=reply_count,
+        bookmark_count=_count(value.get("bookmark_count")),
+        quote_count=_count(value.get("quote_count")),
+        retweet_count=_count(value.get("retweet_count")),
+        translated_text=translated,
+        translated_lang=translated_lang or _string(value.get("lang")),
+    )
+
+
 def decode_tweet(value: object, *, quoted: bool = False) -> XTweet:
     tweet = _unwrap_entry(value)
     if not tweet:
@@ -583,6 +667,8 @@ def decode_response(value: object) -> XTweet:
     if not isinstance(value, dict):
         raise ValueError("response is not an object")
     entry = _dict(_dict(value.get("data")).get("tweetResult"))
-    if not entry:
-        raise ValueError("tweetResult is missing")
-    return decode_tweet(entry)
+    if entry:
+        return decode_tweet(entry)
+    if _string(value.get("__typename")) == "Tweet" or _string(value.get("id_str")):
+        return decode_syndication_tweet(value)
+    raise ValueError("tweet payload is missing")
