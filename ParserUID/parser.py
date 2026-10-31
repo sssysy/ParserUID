@@ -24,7 +24,7 @@ from .config import (
     is_session_enabled,
     set_session_enabled,
 )
-from .utils.exceptions import RegionRestrictedException
+from .utils.exceptions import ParseException, format_user_error, sanitize_error_text
 
 
 class Description(Protocol):
@@ -360,22 +360,38 @@ class ParserRuntime:
 
     async def _run_selected(self, bot: Bot, ev: Event, matched: ParserMatch) -> None:
         acquired = False
+        started_at = self._clock()
         try:
             async with asyncio.timeout(_require_timeout(self._timeout)):
                 await self._gate.acquire()
                 acquired = True
                 await self._parse_and_send(bot, ev, matched)
         except TimeoutError:
-            logger.warning(f"[Parser·解析] 超时 | parser={matched.keyword}")
-            await self._notify_error(bot, "解析超时，请稍后再试")
-        except RegionRestrictedException as exc:
-            logger.warning(f"[Parser·解析] 地区或版权限制 | parser={matched.keyword}")
-            await self._notify_error(bot, exc.message)
-        except Exception as exc:
-            logger.error(
-                f"[Parser·解析] 失败 | parser={matched.keyword} | error_type={type(exc).__name__}",
+            elapsed = self._clock() - started_at
+            logger.warning(
+                f"[Parser·解析] 超时 | parser={matched.keyword} | "
+                f"elapsed={elapsed:.1f}s | timeout={_require_timeout(self._timeout):.1f}s"
             )
-            await self._notify_error(bot, "解析失败，请稍后再试")
+            await self._notify_error(bot, "解析超时，请稍后再试")
+        except ParseException as exc:
+            elapsed = self._clock() - started_at
+            error_text = sanitize_error_text(str(exc))
+            exc.args = (error_text,)
+            exc.message = error_text
+            logger.warning(
+                f"[Parser·解析] 业务异常 | parser={matched.keyword} | "
+                f"error_type={type(exc).__name__} | elapsed={elapsed:.1f}s | error={error_text}"
+            )
+            await self._notify_error(bot, format_user_error(exc))
+        except Exception as exc:
+            elapsed = self._clock() - started_at
+            error_text = sanitize_error_text(str(exc))
+            exc.args = (error_text,)
+            logger.error(
+                f"[Parser·解析] 未预期异常 | parser={matched.keyword} | "
+                f"error_type={type(exc).__name__} | elapsed={elapsed:.1f}s | error={error_text}",
+            )
+            await self._notify_error(bot, format_user_error(exc))
         finally:
             if acquired:
                 await self._gate.release()
@@ -397,7 +413,8 @@ class ParserRuntime:
         try:
             await bot.send(message)
         except Exception as exc:
-            logger.warning(f"[Parser·提示] 发送失败 | error_type={type(exc).__name__}")
+            error_text = sanitize_error_text(str(exc))
+            logger.warning(f"[Parser·提示] 发送失败 | error_type={type(exc).__name__} | error={error_text}")
 
     def _on_task_done(self, task: asyncio.Task[None]) -> None:
         self._tasks.discard(task)
