@@ -16,9 +16,11 @@ from gsuid_core.logger import logger
 from .page import parse_page_html
 from ..base import BaseParser, handle
 from .models import TelegramPost, TelegramMedia
+from ...config import card_image_limit
 from ...sender import ContentItem
 from ...utils.models import Platform, TextContent
-from ...render.models import Author, Metric, PreviewCard
+from ...render.models import Author, Metric, ImageBlock, PreviewCard
+from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException
 
 CHANNEL_PATTERN = r"(?P<channel>[A-Za-z][A-Za-z0-9_]{2,31})"
@@ -273,7 +275,14 @@ class TelegramParser(BaseParser):
             extra_info=extra,
             metrics=metrics,
             repost=repost,
+            blocks=self._image_blocks(post),
         )
+
+    @staticmethod
+    def _image_blocks(post: TelegramPost) -> tuple[ImageBlock, ...]:
+        """Telegram 图片媒体按原顺序进入卡片，视频仍使用封面。"""
+        urls = [item.url or "" for item in post.media if item.kind == "image" and item.sendable]
+        return build_image_blocks(urls, limit=card_image_limit())
 
     def _author(self, post: TelegramPost) -> Author:
         avatar = post.channel_avatar if _is_trusted_media_url(post.channel_avatar) else None

@@ -18,7 +18,8 @@ from .content import (
 from .request import TiebaClient
 from ...sender import ContentItem
 from ...utils.models import Platform, TextContent
-from ...render.models import Comment, CommentReply
+from ...render.models import Comment, CardBlock, CommentReply
+from ...utils.helpers import build_card_blocks
 from ...utils.exceptions import ParseException
 
 _REFERER = "https://tieba.baidu.com/"
@@ -78,8 +79,23 @@ class TiebaParser(BaseParser):
             extra_info=forum_info,
             metrics=build_metrics(info),
             comments=comments,
+            blocks=self._blocks(info.contents),
         )
         return self.result(contents)
+
+    def _blocks(self, fragments: list[Fragment]) -> tuple[CardBlock, ...]:
+        """贴吧正文按楼层原始顺序展示文字、表情与图片。"""
+        segments: list[tuple[str, str]] = []
+        for item in fragments:
+            if item.kind == "image" and item.image is not None:
+                url = normalize_media_url(item.image.url, hosts=IMAGE_HOSTS)
+                if url:
+                    segments.append(("image", url))
+                continue
+            text = item.text or (item.url if item.kind == "link" else "")
+            if text:
+                segments.append(("text", text))
+        return build_card_blocks(segments, limit=self.card_image_limit)
 
     def _contents(self, fragments: list[Fragment]) -> list[ContentItem]:
         output: list[ContentItem] = []

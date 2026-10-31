@@ -28,7 +28,15 @@ from ..config import ParserItemConfig
 from .content import comment_text, clean_status_text, parse_article_blocks
 from ...sender import ContentItem
 from ...utils.models import Platform
-from ...render.models import Author, Metric, Comment, PreviewCard, CommentReply
+from ...render.models import (
+    Author,
+    Metric,
+    Comment,
+    CardBlock,
+    PreviewCard,
+    CommentReply,
+)
+from ...utils.helpers import build_card_blocks
 from ...utils.exceptions import ParseException
 
 VISITOR_GEN_URL = "https://passport.weibo.com/visitor/genvisitor"
@@ -415,8 +423,19 @@ class WeiboParser(BaseParser):
                 metrics=metrics,
                 comments=comments,
                 repost=repost,
+                blocks=_status_blocks(status, limit=self.card_image_limit),
             )
         return self.result(contents)
+
+
+def _status_blocks(status: WeiboStatus, *, limit: int) -> tuple[CardBlock, ...]:
+    """微博动态正文常先图后文，卡片按原始顺序渲染图文。"""
+    if not status.pics:
+        return ()
+    return build_card_blocks(
+        [("image", pic.image_url) for pic in status.pics],
+        limit=limit,
+    )
 
     async def _build_repost_card(self, status: WeiboStatus) -> PreviewCard | None:
         if status.retweeted is None or not bool(self.get_config_value("include_reposts", "true").lower() == "true"):
@@ -644,6 +663,10 @@ class WeiboParser(BaseParser):
             url=str(data.get("url") or f"https://weibo.com/ttarticle/p/show?id={article_id}"),
             metrics=metrics,
             timestamp=timestamp,
+            blocks=build_card_blocks(
+                [(kind, value or "") for kind, value in blocks],
+                limit=self.card_image_limit,
+            ),
         )
         return self.result(contents)
 

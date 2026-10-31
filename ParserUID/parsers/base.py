@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence, Awaitable, Coroutine
 import httpx
 
 from .config import ParserItemConfig
-from ..config import proxy_url
+from ..config import proxy_url, card_image_limit
 from ..sender import ContentItem, send_proxy_context
 from ..utils.ffmpeg import merge_to_live_mp4
 from ..utils.models import (
@@ -102,6 +102,11 @@ class BaseParser:
         if enabled is not True:
             return None
         return proxy_url()
+
+    @property
+    def card_image_limit(self) -> int:
+        """预览卡片正文图片数量上限，0 表示不限制。"""
+        return card_image_limit()
 
     def _collect_handlers(self) -> None:
         seen_names: set[str] = set()

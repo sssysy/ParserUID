@@ -17,8 +17,10 @@ from .models import (
     decode_init_state,
     build_photo_metrics,
 )
+from ...config import card_image_limit
 from ...utils.models import Platform, MediaContent
-from ...render.models import Comment
+from ...render.models import Comment, ImageBlock
+from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException
 
 
@@ -86,8 +88,16 @@ class KuaiShouParser(BaseParser):
             metrics=metrics,
             comments=tuple(comments),
             video_duration=f"{int(photo.duration / 1000)}s" if photo.duration > 0 else None,
+            blocks=self._image_blocks(photo),
         )
         return self.result(contents)
+
+    @staticmethod
+    def _image_blocks(photo: Photo) -> tuple[ImageBlock, ...]:
+        """快手图文帖的图片按原顺序进入卡片，视频作品不重复渲染封面。"""
+        if photo.video_urls:
+            return ()
+        return build_image_blocks(photo.image_urls, limit=card_image_limit())
 
     @staticmethod
     def _matched_url(searched: re.Match[str]) -> str:

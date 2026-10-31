@@ -28,9 +28,11 @@ from .models import (
     video_candidates,
     trusted_media_url,
 )
+from ...config import card_image_limit
 from ...sender import ContentItem
 from ...utils.models import Platform
-from ...render.models import Metric
+from ...render.models import Metric, ImageBlock
+from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException
 
 TIKTOK_HEADERS = {
@@ -408,5 +410,17 @@ class TikTokParser(BaseParser):
             timestamp=info.timestamp,
             metrics=metrics,
             video_duration=(f"{int(info.duration)}s" if selected_video is not None and info.duration > 0 else None),
+            blocks=self._image_blocks(info, has_video=selected_video is not None),
         )
         return self.result(contents)
+
+    @staticmethod
+    def _image_blocks(
+        info: TikTokInfo,
+        *,
+        has_video: bool,
+    ) -> tuple[ImageBlock, ...]:
+        """TikTok 图文帖的图片按原顺序进入卡片，视频作品不重复渲染封面。"""
+        if has_video:
+            return ()
+        return build_image_blocks(image_urls(info.images), limit=card_image_limit())

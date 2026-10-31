@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 import httpx
 import msgspec
+from curl_cffi.requests.exceptions import RequestException
 
 from gsuid_core.logger import logger
 
@@ -29,6 +30,7 @@ from .models import (
 )
 from ...sender import ContentItem
 from ...utils.models import Platform
+from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException
 
 INITIAL_STATE_RE = re.compile(
@@ -39,13 +41,14 @@ UNDEFINED_VALUE_RE = re.compile(
     r"(?P<prefix>[:,\[]\s*)undefined(?=\s*[,}\]])"
     r"|(?P<scalar>undefined)"
 )
-JS_WRAPPER_RE = re.compile(r"new\s+(?:Map|Set|WeakMap|WeakSet)\s*\(\s*(\[[\s\S]*?\])\s*\)")
+JS_WRAPPER_RE = re.compile(r"\bnew\s+(?:Map|Set|WeakMap|WeakSet)\s*\(\s*(\[[\s\S]*?\])\s*\)")
 NOTE_UNAVAILABLE_MARKERS = (
     "当前笔记暂时无法浏览",
     "当前笔记暂时无法查看",
     "笔记不存在",
     "笔记已删除",
 )
+LOGIN_PATH_MARKERS = ("/login", "/website-login")
 
 
 def _unwrap_note(value: object, note_id: str) -> dict[str, object] | None:
@@ -87,10 +90,10 @@ def find_note_data(state: dict[str, object], note_id: str) -> dict[str, object] 
 
 
 def extract_initial_state(html: str) -> dict[str, object]:
-    if any(marker in html for marker in NOTE_UNAVAILABLE_MARKERS):
-        raise ParseException("小红书笔记暂时无法浏览，可能需要登录 Cookie")
     matched = INITIAL_STATE_RE.search(html)
     if not matched:
+        if any(marker in html for marker in NOTE_UNAVAILABLE_MARKERS):
+            raise ParseException("小红书笔记暂时无法浏览，可能需要登录 Cookie")
         raise ParseException("小红书链接已失效或笔记已删除")
     raw = matched.group(1).strip().rstrip(";")
 
@@ -123,6 +126,11 @@ def is_unavailable_redirect(url: str) -> bool:
     return error_code == "300031" or any(marker in message for marker in NOTE_UNAVAILABLE_MARKERS)
 
 
+def is_login_redirect(url: str) -> bool:
+    path = urlparse(url).path.lower().rstrip("/")
+    return any(path == marker or path.startswith(f"{marker}/") for marker in LOGIN_PATH_MARKERS)
+
+
 def decode_note_from_state(state: dict[str, object], note_id: str) -> XhsNote:
     raw = find_note_data(state, note_id)
     if raw is None:
@@ -152,7 +160,7 @@ class XhsParser(BaseParser):
             "Referer": "https://www.xiaohongshu.com/",
             "Origin": "https://www.xiaohongshu.com",
         }
-        cookie = self.get_config_value("cookie")
+        cookie = self.get_config_value("cookie").strip() or self.get_config_value("cookies").strip()
         if cookie:
             headers["Cookie"] = cookie
         return headers
@@ -167,7 +175,7 @@ class XhsParser(BaseParser):
             ),
             "Referer": "https://www.xiaohongshu.com/",
         }
-        cookie = self.get_config_value("cookie")
+        cookie = self.get_config_value("cookie").strip() or self.get_config_value("cookies").strip()
         if cookie:
             headers["Cookie"] = cookie
         return headers
@@ -175,6 +183,9 @@ class XhsParser(BaseParser):
     @staticmethod
     def _matched_url(searched: re.Match[str]) -> str:
         value = searched.group(0)
+        raw = searched.string.strip()
+        if raw.startswith(("http://", "https://")) and value in raw and " " not in raw:
+            value = raw
         if not value.startswith(("http://", "https://")):
             value = f"https://{value}"
         return value
@@ -194,11 +205,18 @@ class XhsParser(BaseParser):
     async def _resolve_short_link(self, url: str) -> str:
         """多次追踪重定向解析小红书短链。"""
         current = url
+        client = await self.get_curl_client()
         for _ in range(4):
-            final_url = await self.get_final_url(
-                current,
-                headers=self.web_headers,
-            )
+            try:
+                response = await client.get(
+                    current,
+                    headers=self.web_headers,
+                    allow_redirects=True,
+                    timeout=30,
+                )
+                final_url = str(response.url)
+            except (httpx.HTTPError, RequestException, TimeoutError, UnicodeError):
+                final_url = current
             if note_ref_from_url(final_url)[0]:
                 return final_url
             next_url = await self._extract_redirect_from_page(final_url)
@@ -209,12 +227,17 @@ class XhsParser(BaseParser):
 
     async def _extract_redirect_from_page(self, url: str) -> str | None:
         try:
-            client = await self.get_client()
-            response = await client.get(url, headers=self.web_headers)
+            client = await self.get_curl_client()
+            response = await client.get(
+                url,
+                headers=self.web_headers,
+                allow_redirects=True,
+                timeout=30,
+            )
             if response.status_code >= 400:
                 return None
             html = response.text
-        except (httpx.HTTPError, TimeoutError, UnicodeError):
+        except (httpx.HTTPError, RequestException, TimeoutError, UnicodeError):
             return None
 
         candidates = (
@@ -239,7 +262,8 @@ class XhsParser(BaseParser):
     @handle(
         "xiaohongshu.com",
         r"(?:www\.)?xiaohongshu\.com/"
-        r"(?:explore|discovery/item|search_result)/(?P<note_id>[0-9A-Za-z]+)",
+        r"(?:explore|discovery/item|search_result)/(?P<note_id>[0-9A-Za-z]+)"
+        r"(?:[/?#][^\s]*)?",
     )
     async def _parse_common(self, searched: re.Match[str]) -> Sequence[ContentItem]:
         url = self._matched_url(searched)
@@ -251,7 +275,7 @@ class XhsParser(BaseParser):
     @handle(
         "target_note_id",
         r"xiaohongshu\.com/[^\s]*[?&]target_note_id="
-        r"(?P<note_id>[0-9A-Za-z]+)",
+        r"(?P<note_id>[0-9A-Za-z]+)(?:[^\s]*)?",
     )
     async def _parse_target_note(self, searched: re.Match[str]) -> Sequence[ContentItem]:
         url = self._matched_url(searched)
@@ -290,25 +314,32 @@ class XhsParser(BaseParser):
         return list(dict.fromkeys(urls))
 
     async def _fetch_note(self, url: str, note_id: str) -> XhsNote:
-        client = await self.get_client()
+        client = await self.get_curl_client()
         retries = 2
         last_error: Exception | None = None
         for attempt in range(retries + 1):
             try:
-                response = await client.get(url, headers=self.web_headers)
+                response = await client.get(
+                    url,
+                    headers=self.web_headers,
+                    allow_redirects=True,
+                    timeout=30,
+                )
                 if response.status_code >= 400:
                     raise ParseException(f"HTTP 请求错误 {response.status_code}")
                 html = response.text
                 response_url = str(response.url)
-            except (httpx.HTTPError, TimeoutError, UnicodeError) as exc:
+            except (httpx.HTTPError, RequestException, TimeoutError, UnicodeError) as exc:
                 last_error = exc
                 if attempt < retries:
                     await asyncio.sleep(1 + attempt)
                     continue
                 raise ParseException("小红书页面请求失败") from exc
 
+            if is_login_redirect(response_url):
+                raise ParseException("小红书登录状态已失效，请更新 Cookie")
             if is_unavailable_redirect(response_url):
-                raise ParseException("小红书笔记暂时无法浏览，可能需要登录 Cookie")
+                raise ParseException("小红书笔记暂时无法浏览")
             state = extract_initial_state(html)
             return decode_note_from_state(state, note_id)
         raise ParseException("小红书页面请求失败") from last_error
@@ -372,21 +403,27 @@ class XhsParser(BaseParser):
             text=note.text,
             url=display_url,
             metrics=note.metrics,
+            blocks=build_image_blocks(image_urls, limit=self.card_image_limit),
         )
         return self.result(contents)
 
     async def _fetch_author_profile(self, user_id: str | None) -> XhsUserPageData | None:
-        cookie = self.get_config_value("cookie")
+        cookie = self.get_config_value("cookie").strip() or self.get_config_value("cookies").strip()
         if not user_id or not cookie:
             return None
         url = f"https://www.xiaohongshu.com/user/profile/{user_id}"
         try:
-            client = await self.get_client()
-            response = await client.get(url, headers=self.web_headers)
+            client = await self.get_curl_client()
+            response = await client.get(
+                url,
+                headers=self.web_headers,
+                allow_redirects=True,
+                timeout=30,
+            )
             if response.status_code >= 400:
                 return None
             html = response.text
-        except (httpx.HTTPError, TimeoutError, UnicodeError):
+        except (httpx.HTTPError, RequestException, TimeoutError, UnicodeError):
             return None
         try:
             state = extract_initial_state(html)

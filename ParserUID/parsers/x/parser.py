@@ -20,7 +20,8 @@ from .models import (
 )
 from ...sender import ContentItem
 from ...utils.models import Platform
-from ...render.models import Author, Metric, PreviewCard
+from ...render.models import Author, Metric, ImageBlock, PreviewCard
+from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException
 
 V2_BEARER = (
@@ -306,6 +307,17 @@ class XParser(BaseParser):
     def _create_graphic(self, url: str) -> ContentItem:
         return self.create_image_contents([url], headers=self._media_headers(), proxy=self.proxy)[0]
 
+    def _image_blocks(self, tweet: XTweet) -> tuple[ImageBlock, ...]:
+        """图片推文与长文图片按原顺序进入卡片，视频不重复渲染封面。"""
+        urls = [media.source_url for media in tweet.media if media.kind == "photo" and media.source_url]
+        if not urls:
+            urls = [
+                block.media.source_url
+                for block in tweet.article_blocks
+                if block.media is not None and block.media.kind == "photo" and block.media.source_url
+            ]
+        return build_image_blocks(urls, limit=self.card_image_limit)
+
     def _contents(self, tweet: XTweet) -> list[ContentItem]:
         return tweet_contents(
             tweet,
@@ -370,6 +382,7 @@ class XParser(BaseParser):
             url=tweet.source_url,
             metrics=self._metrics(tweet),
             repost=repost,
+            blocks=self._image_blocks(tweet),
         )
 
         contents = self._contents(tweet)

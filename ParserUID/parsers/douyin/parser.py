@@ -21,9 +21,11 @@ from .models import (
     comment_limit,
     decode_comments,
 )
+from ...config import card_image_limit
 from ...utils.utils import format_num
 from ...utils.models import Platform, MediaContent
 from ...render.models import Metric, Comment, ImageBlock
+from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException
 
 
@@ -276,6 +278,7 @@ class DouYinParser(BaseParser):
                 metrics=aweme.metrics,
                 comments=tuple(comments),
                 timestamp=aweme.create_time or None,
+                blocks=self._image_blocks(aweme),
             )
         elif aweme.images:
             await self.send_info(
@@ -303,6 +306,7 @@ class DouYinParser(BaseParser):
                 timestamp=aweme.create_time or None,
                 video_duration=f"{int(duration_sec)}s" if duration_sec > 0 else None,
                 video_quality=selected.quality if selected else None,
+                blocks=self._image_blocks(aweme),
             )
         return self.result(contents)
 
@@ -417,11 +421,8 @@ class DouYinParser(BaseParser):
     def _image_blocks(aweme: Aweme) -> tuple[ImageBlock, ...]:
         if aweme.images is None:
             return ()
-        blocks: list[ImageBlock] = []
-        for image in aweme.images:
-            if image.clip_type in (2, 5, None) and image.url_list:
-                blocks.append(ImageBlock(url=image.url_list[0]))
-        return tuple(blocks)
+        urls = [image.url_list[0] for image in aweme.images if image.clip_type in (2, 5, None) and image.url_list]
+        return build_image_blocks(urls, limit=card_image_limit())
 
     async def _fetch_comments(self, aweme_id: str) -> list[Comment]:
         if not self.config.get_bool("include_comments", False):

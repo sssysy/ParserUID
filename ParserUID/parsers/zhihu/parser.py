@@ -39,7 +39,8 @@ from .content import (
 from .request import ZhihuClient, initial_entities
 from ...sender import ContentItem
 from ...utils.models import Platform, TextContent
-from ...render.models import Author, Metric, Comment
+from ...render.models import Author, Metric, Comment, CardBlock
+from ...utils.helpers import build_card_blocks
 from ...utils.exceptions import ParseException
 
 _ZHIHU_HEADERS = {
@@ -106,6 +107,17 @@ def _summary(*values: object, limit: int = 80) -> str | None:
     return None
 
 
+def _card_text(plain_text: str, *fallbacks: object) -> str:
+    text = clean_text(plain_text)
+    if text:
+        return text
+    for value in fallbacks:
+        text = clean_text(_plain_text(str(value or "")))
+        if text:
+            return text
+    return ""
+
+
 def _plain_text(value: str) -> str:
     if not value:
         return ""
@@ -113,6 +125,22 @@ def _plain_text(value: str) -> str:
     for node in soup.find_all(["script", "style", "noscript", "img", "video"]):
         node.decompose()
     return soup.get_text("\n", strip=False)
+
+
+def _card_blocks(
+    blocks: list[dict[str, object]],
+    *,
+    limit: int,
+) -> tuple[CardBlock, ...]:
+    """知乎富文本按原顺序进入卡片，视频块不参与图文卡片渲染。"""
+    segments: list[tuple[str, str]] = []
+    for block in blocks:
+        kind = block.get("kind")
+        value = str(block.get("value") or "").strip()
+        if not value or kind not in {"text", "image"}:
+            continue
+        segments.append((kind, value))
+    return build_card_blocks(segments, limit=limit)
 
 
 def _comment_images(content: str) -> list[str]:
@@ -230,11 +258,12 @@ class ZhihuParser(BaseParser):
             title=article.title or "知乎文章",
             card_type="common",
             author=author,
-            text=_summary(article.excerpt, text) or "",
+            text=_card_text(text, article.excerpt),
             url=url,
             extra_info=_card_info("文章", *[(m.label, m.value) for m in metrics]),
             metrics=metrics,
             comments=comments,
+            blocks=_card_blocks(bodies, limit=self.card_image_limit),
         )
         return self.result(contents)
 
@@ -267,11 +296,12 @@ class ZhihuParser(BaseParser):
             title=title,
             card_type="common",
             author=author,
-            text=_summary(answer.excerpt, text) or "",
+            text=_card_text(text, answer.excerpt),
             url=url,
             extra_info=_card_info("回答", *[(m.label, m.value) for m in metrics]),
             metrics=metrics,
             comments=comments,
+            blocks=_card_blocks(bodies, limit=self.card_image_limit),
         )
         return self.result(contents)
 
@@ -321,11 +351,12 @@ class ZhihuParser(BaseParser):
             title=question.title or "知乎问题",
             card_type="common",
             author=author if first_answer is None else self._author(first_answer.author),
-            text=_summary(question.detail, question.excerpt, text, answer_text) or "",
+            text=_card_text(text, question.detail, question.excerpt, answer_text),
             url=url,
             extra_info=_card_info("问题", *[(m.label, m.value) for m in metrics]),
             metrics=metrics,
             comments=comments,
+            blocks=_card_blocks([*bodies, *answer_blocks], limit=self.card_image_limit),
         )
         return self.result(contents)
 
@@ -358,13 +389,14 @@ class ZhihuParser(BaseParser):
             title=_summary(body_html, text) or "知乎想法",
             card_type="common",
             author=author,
-            text=_summary(body_html, text) or "",
+            text=_card_text(text, body_html),
             url=url,
             extra_info=_card_info("想法"),
             metrics=_metrics(
                 ("赞同", payload.get("voteup_count") or payload.get("voteupCount")),
                 ("评论", payload.get("comment_count") or payload.get("commentCount")),
             ),
+            blocks=_card_blocks(bodies, limit=self.card_image_limit),
         )
         return self.result(contents)
 
@@ -450,11 +482,12 @@ class ZhihuParser(BaseParser):
             return None
 
     async def _load_comments(self, path: str, url: str) -> tuple[Comment, ...]:
-        if not bool(self.get_config_value("include_comments", "true").lower() == "true"):
+        limit = max(0, min(self.config.get_int("comment_limit", 20), 20))
+        if limit == 0 or not self.config.get_bool("include_comments", True):
             return ()
         try:
             payload = await (await self._get_client()).fetch_api(
-                f"https://www.zhihu.com/api/v4/comment_v5/{path}/root_comment?order_by=score&limit=20"
+                f"https://www.zhihu.com/api/v4/comment_v5/{path}/root_comment?order_by=score&limit={limit}"
             )
             page = COMMENT_DECODER.decode(self._json_bytes(payload))
         except Exception as exc:

@@ -21,6 +21,12 @@
       "label": "卡片显示评论",
       "default": true
     },
+    "comment_limit": {
+      "type": "int",
+      "label": "评论数量",
+      "hint": "每次最多获取的根评论数量，范围 0-20；0 表示不获取评论",
+      "default": 20
+    },
     "question_first_answer": {
       "type": "bool",
       "label": "问题页附带首条回答",

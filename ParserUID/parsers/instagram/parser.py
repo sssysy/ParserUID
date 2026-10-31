@@ -25,8 +25,11 @@ from .media import (
     unwrap_entries,
     format_selector,
 )
+from ...config import card_image_limit
 from ...sender import ContentItem
 from ...utils.models import Platform, VideoContent
+from ...render.models import ImageBlock
+from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException, DownloadException
 
 COOKIE_DOMAIN = ".instagram.com"
@@ -197,9 +200,18 @@ class InstagramParser(BaseParser):
             text=post.text or "",
             url=post.target.url,
             timestamp=post.timestamp,
+            blocks=self._image_blocks(post),
         )
 
     def _build_contents(self, post: InstagramPost) -> list[ContentItem]:
+        return self._media_contents(post)
+
+    def _image_blocks(self, post: InstagramPost) -> tuple[ImageBlock, ...]:
+        """轮播图文按原顺序进入卡片，视频条目不参与图文卡片。"""
+        urls = [media.url for media in post.medias if media.kind == "image" and media.url]
+        return build_image_blocks(urls, limit=card_image_limit())
+
+    def _media_contents(self, post: InstagramPost) -> list[ContentItem]:
         contents: list[ContentItem] = []
         for media in post.medias:
             if media.kind == "video":

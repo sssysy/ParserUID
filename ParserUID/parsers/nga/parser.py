@@ -11,6 +11,7 @@ from .content import parse_post_html
 from .request import NgaRequest
 from ...sender import ContentItem
 from ...utils.models import Platform, TextContent
+from ...utils.helpers import build_card_blocks
 from ...utils.exceptions import ParseException
 
 
@@ -112,5 +113,6 @@ class NGAParser(BaseParser):
             text="" if show_text else (post.body_text or ""),
             url=url,
             extra_info=extra_info,
+            blocks=build_card_blocks(post.segments, limit=self.card_image_limit),
         )
         return self.result(contents)

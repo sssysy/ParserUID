@@ -22,6 +22,7 @@ CONFIG_PATH: Final = DATA_DIR / "config.json"
 SESSION_SWITCH_PATH: Final = DATA_DIR / "session_switches.json"
 
 DEFAULT_SKIN_PACK: Final = "default"
+MAX_CARD_IMAGE_BLOCKS: Final = 9
 
 
 CONFIG_DEFAULT: dict[str, GSC] = {
@@ -101,6 +102,12 @@ CONFIG_DEFAULT: dict[str, GSC] = {
         title="显示下载失败提示",
         desc="开启后，媒体下载或处理失败时发送简短原因；详细错误只写日志。",
         data=True,
+    ),
+    "card_image_limit": GsIntConfig(
+        title="卡片正文图片上限",
+        desc="单个预览卡片渲染的正文图片数量上限，超出部分只走结果媒体；0 表示不限制。",
+        data=MAX_CARD_IMAGE_BLOCKS,
+        max_value=30,
     ),
     "node_enabled": GsBoolConfig(
         title="启用合并转发",
@@ -231,6 +238,12 @@ def default_skin_pack() -> str:
     """返回去掉空白后的皮肤包名，空值回落到 default。"""
     value = str(parser_config.get_config("default_skin_pack").data).strip()
     return value or DEFAULT_SKIN_PACK
+
+
+def card_image_limit() -> int:
+    """返回预览卡片正文图片数量上限，0 表示不限制。"""
+    value = parser_config.get_config("card_image_limit").data
+    return max(0, int(value))
 
 
 def proxy_url() -> str | None:

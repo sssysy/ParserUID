@@ -51,6 +51,7 @@ from .comment import comment_limit, decode_comments as decode_card_comments
 from ...utils.ffmpeg import merge_av
 from ...utils.models import Platform, MediaContent
 from ...render.models import Author, Metric, Comment
+from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException
 
 if TYPE_CHECKING:
@@ -988,6 +989,7 @@ class BilibiliParser(BaseParser):
             author=author,
             text=dynamic.text or "",
             cover_url=next(iter(dynamic.images), dynamic.cover),
+            blocks=build_image_blocks(dynamic.images, limit=self.card_image_limit),
             url=dynamic.url,
             metrics=dynamic.metrics,
         )
@@ -1070,24 +1072,19 @@ class BilibiliParser(BaseParser):
             clean_cover(fav.info.upper.face),
             uid=str(fav.info.upper.mid),
         )
+        covers = [clean_cover(media.cover) or media.cover for media in fav.medias if media.cover]
         contents: list[MediaContent] = []
-        for media in fav.medias:
-            if not media.cover:
-                continue
-            contents.extend(
-                self.create_image_contents(
-                    [clean_cover(media.cover) or media.cover],
-                    proxy=self.proxy,
-                )
-            )
+        if covers:
+            contents = self.create_image_contents(covers, proxy=self.proxy)
         await self.send_info(
             card_type="common",
             title=f"收藏夹 - {fav.info.title}",
             author=author,
             text=fav.info.intro or None,
-            cover_url=fav.medias[0].cover if fav.medias else None,
+            cover_url=next(iter(covers), None),
             url=(f"https://space.bilibili.com/{fav.info.upper.mid}/favlist?fid={fav_id}"),
             metrics=fav.metrics,
+            blocks=build_image_blocks(covers, limit=self.card_image_limit),
         )
         return self.result(contents)
 
@@ -1149,30 +1146,26 @@ class BilibiliParser(BaseParser):
             description=str(author_data.get("sign") or "") or None,
             uid=str(author_data.get("mid") or "") or None,
         )
+        image_urls = [
+            normalize_url(image)
+            for image in data.get("image_urls") or []
+            if isinstance(image, str) and is_allowed_media_host(image)
+        ]
         contents: list[MediaContent] = []
-        for image in data.get("image_urls") or []:
-            if isinstance(image, str) and is_allowed_media_host(image):
-                contents.extend(
-                    self.create_image_contents(
-                        [normalize_url(image)],
-                        headers=self.media_headers,
-                        proxy=self.proxy,
-                    )
-                )
+        if image_urls:
+            contents = self.create_image_contents(
+                image_urls,
+                headers=self.media_headers,
+                proxy=self.proxy,
+            )
         await self.send_info(
             card_type="common",
             title=str(data.get("title") or "哔哩哔哩专栏"),
             author=author,
             text=str(data.get("summary") or data.get("content") or "") or None,
-            cover_url=next(
-                (
-                    image
-                    for image in data.get("image_urls") or []
-                    if isinstance(image, str) and is_allowed_media_host(image)
-                ),
-                None,
-            ),
+            cover_url=next(iter(image_urls), None),
             url=f"https://www.bilibili.com/read/cv{read_id}",
             metrics=metrics,
+            blocks=build_image_blocks(image_urls, limit=self.card_image_limit),
         )
         return self.result(contents)

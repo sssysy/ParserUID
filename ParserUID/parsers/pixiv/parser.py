@@ -27,9 +27,11 @@ from .utils import (
     ugoira_to_pdf,
     clean_novel_text,
 )
+from ...config import card_image_limit
 from ...sender import ContentItem
 from ...utils.models import Platform, FileContent, ImageContent
-from ...render.models import Author
+from ...render.models import Author, ImageBlock
+from ...utils.helpers import build_image_blocks
 from ...utils.exceptions import ParseException
 
 
@@ -310,6 +312,7 @@ class PixivParser(BaseParser):
                 illust_type = 0
 
         contents: list[ContentItem] = []
+        image_urls: list[str] = []
         if action == "blur":
             if illust_type == 2 and ugoira_meta is not None:
                 pdf_content = FileContent(name=f"pixiv_{pid}.pdf")
@@ -357,6 +360,7 @@ class PixivParser(BaseParser):
             info_parts.append(f"共 {page_count} P")
         if original_type == 2 and ugoira_meta is None:
             info_parts.append("动图元数据获取失败，已回退为静态图片")
+        blocks = self._blocks(image_urls)
         await self.send_info(
             title=title or "Pixiv 插画",
             card_type="common",
@@ -365,8 +369,14 @@ class PixivParser(BaseParser):
             text=text,
             url=f"{PIXIV_BASE}/artworks/{pid}",
             extra_info="\n".join(info_parts) if info_parts else None,
+            blocks=blocks,
         )
         return self.result(contents)
+
+    @staticmethod
+    def _blocks(urls: list[str]) -> tuple[ImageBlock, ...]:
+        """Pixiv 多图作品按页序进入卡片，动图与 PDF 分支保持原逻辑。"""
+        return build_image_blocks(urls, limit=card_image_limit())
 
     async def _handle_manga(
         self,
@@ -413,6 +423,7 @@ class PixivParser(BaseParser):
         if not image_urls:
             raise ParseException("Pixiv 未找到漫画图片")
         pdf = self._create_pdf_content(pid, image_urls)
+        blocks = self._blocks(image_urls)
         await self.send_info(
             title=title or "Pixiv 漫画",
             card_type="common",
@@ -421,5 +432,6 @@ class PixivParser(BaseParser):
             text=text,
             url=f"{PIXIV_BASE}/artworks/{pid}",
             extra_info=series_info or None,
+            blocks=blocks,
         )
         return self.result([pdf])

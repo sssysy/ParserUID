@@ -17,6 +17,7 @@ from .content import PostContent, build_post_content
 from .request import XiaoheiheClient
 from ...sender import ContentItem
 from ...utils.models import Platform, TextContent
+from ...utils.helpers import build_card_blocks, build_image_blocks
 from ...utils.exceptions import ParseException
 
 
@@ -181,6 +182,10 @@ class XiaoheiheParser(BaseParser):
             url=url,
             extra_info=" · ".join(info) if info else None,
             metrics=tuple(content.metrics),
+            blocks=build_card_blocks(
+                [(kind, value) for kind, value, _ in content.segments if kind in {"text", "image", "live"}],
+                limit=self.card_image_limit,
+            ),
         )
         return self.result(contents)
 
@@ -205,6 +210,7 @@ class XiaoheiheParser(BaseParser):
             text="" if show_text else (content.description or ""),
             url=url,
             extra_info=" · ".join(info) if info else None,
+            blocks=build_image_blocks(content.image_urls, limit=self.card_image_limit),
         )
         return self.result(contents)
 
