@@ -42,6 +42,8 @@ class TemplateText:
 @dataclass(frozen=True, slots=True)
 class TemplateImage:
     uri: str
+    width: int
+    height: int
     caption: str | None = None
 
 
@@ -49,6 +51,7 @@ class TemplateImage:
 class TemplateImageGroup:
     images: tuple[TemplateImage, ...]
     columns: int
+    layout: Literal["single", "grid", "stacked"]
     hidden_count: int = 0
     kind: ClassVar[Literal["image_group"]] = "image_group"
 

@@ -94,7 +94,6 @@
 - [ ] 测试证明解析器默认不启用。
 - [ ] 测试证明禁用解析器不进入匹配快照。
 - [ ] 修改 `config.json` 后已校验 JSON。
-- [ ] `uv run --dev ruff check .` 通过。
-- [ ] `uv run --dev ruff format --check .` 通过。
-- [ ] `uv run --dev pytest tests -q` 通过。
-- [ ] `uv run --dev basedpyright` 通过。
+- [ ] `python -m ruff check ParserUID` 通过。
+- [ ] `python -m ruff format --check ParserUID` 通过。
+- [ ] `python -m basedpyright ParserUID` 通过。

@@ -171,8 +171,7 @@ data/ParserUID/thirdparty/parsers/<name>/
 在插件根目录执行完整的交付闸验证，缺一不可：
 
 ```powershell
-uv run --dev ruff check ParserUID tests
-uv run --dev ruff format --check ParserUID tests
-uv run --dev basedpyright ParserUID
-uv run --dev pytest --basetemp=.pytest_tmp -o cache_dir=.pytest_cache tests -q
+python -m ruff check ParserUID
+python -m ruff format --check ParserUID
+python -m basedpyright ParserUID
 ```

@@ -76,8 +76,14 @@
 {%- endmacro %}
 
 {% macro render_image_group(group) -%}
-    {% if group.images|length == 1 %}
-        <div class="single-image"><img src="{{ group.images[0].uri }}" alt=""></div>
+    {% if group.layout == "single" %}
+        <div class="single-image"><img src="{{ group.images[0].uri }}" width="{{ group.images[0].width }}" height="{{ group.images[0].height }}" alt=""></div>
+    {% elif group.layout == "stacked" %}
+        <div class="stacked-images">
+            {% for image in group.images %}
+                <img src="{{ image.uri }}" width="{{ image.width }}" height="{{ image.height }}" alt="">
+            {% endfor %}
+        </div>
     {% else %}
         <div class="grid grid-{{ group.columns }}">
             {% for image in group.images %}

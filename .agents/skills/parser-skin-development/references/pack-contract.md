@@ -45,7 +45,7 @@ ParserUID/render/pack/<name>/
 - `common` 与 `video` 是版式键；`bilibili` 等平台键对应
   `<platform>.html`。
 - 渲染顺序是平台模板、当前类型模板、`default`，不可用则继续回退。
-- manifest 必须是合法 JSON。改完后用 `load_skin_manifest()` 或测试读取。
+- manifest 必须是合法 JSON。改完后用 `load_skin_manifest()` 读取校验。
 
 ## 模板入口
 

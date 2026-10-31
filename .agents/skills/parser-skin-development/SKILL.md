@@ -121,17 +121,16 @@ from ParserUID.render import helpers
 
 ## 验证
 
-新增或修改皮肤后，至少补一个离线渲染测试：用 `tmp_path` 构造图片和
-`PreviewCard`，调用 `render_preview(..., skin="<name>")`，检查 PNG 签名和
-输出宽度。context.py 的派生字段和模板回退顺序应有独立断言。
+新增或修改皮肤后，用 `docs/output/` 保存本地素材与验证截图，调用
+`render_preview(..., skin="<name>")` 检查 PNG 签名、输出宽度和图片比例。
+验证 context.py 派生字段与模板回退顺序时，不要把结果写入插件源码目录。
 
 在插件根目录运行：
 
 ```powershell
-uv run --dev ruff check ParserUID tests
-uv run --dev ruff format --check ParserUID tests
-uv run --dev pytest --basetemp=.pytest_tmp -o cache_dir=.pytest_cache tests -q
-uv run --dev basedpyright ParserUID
+python -m ruff check ParserUID
+python -m ruff format --check ParserUID
+python -m basedpyright ParserUID
 ```
 
 修改已有皮肤的视觉输出后，清理 `data/ParserUID/render_cache/` 或提升

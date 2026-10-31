@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import msgspec
 from msgspec import Struct
 
 
@@ -13,5 +14,5 @@ class MagnetInfoResponse(Struct):
     name: str = "未知资源"
     file_type: str = "未知"
     size: float | int = 0
-    screenshots: list[ScreenshotItem] = []
+    screenshots: list[ScreenshotItem] | None = msgspec.field(default_factory=list)
     error: str = ""

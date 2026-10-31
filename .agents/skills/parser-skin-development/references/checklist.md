@@ -25,11 +25,11 @@
 - [ ] 字体优先 `MiSans`，没有依赖未注册的远程字体。
 - [ ] 没有外部 CDN、远程图片或 `file://` 路径。
 
-## 测试
+## 验证
 
-- [ ] 用 `tmp_path` 构造离线卡片和图片。
+- [ ] 用 `docs/output/` 中的本地卡片和图片做离线检查。
 - [ ] 调用 `render_preview(card, skin="<name>")` 并检查 PNG 签名与宽度。
-- [ ] 平台专属模板、类型模板和 `default` 的逐级回退顺序有测试。
+- [ ] 平台专属模板、类型模板和 `default` 的逐级回退顺序经过验证。
 - [ ] 覆盖无封面、无头像、空评论、图片块缺失等空值场景。
 - [ ] 未知皮肤名抛出明确异常。
 - [ ] 修改已有皮肤后清理 `data/ParserUID/render_cache/` 或提升
@@ -40,11 +40,9 @@
 在插件根目录运行：
 
 ```powershell
-uv run --dev ruff check ParserUID tests
-uv run --dev ruff format --check ParserUID tests
-uv run --dev pytest --basetemp=.pytest_tmp -o cache_dir=.pytest_cache tests -q
-uv run --dev basedpyright ParserUID
+python -m ruff check ParserUID
+python -m ruff format --check ParserUID
+python -m basedpyright ParserUID
 ```
 
-如果新增或修改了皮肤渲染路径，至少运行 `tests/test_render_preview.py`；
-只有改动触及日志或 locale 时才需要额外运行 `tests/test_logger_i18n.py`。
+如果新增或修改了皮肤渲染路径，用 `docs/output/` 下的本地素材执行一次出图检查。

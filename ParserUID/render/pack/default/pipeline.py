@@ -13,6 +13,7 @@ from ...helpers import (
     circle,
     data_uri,
     fit_cover,
+    fit_width,
     read_rgba,
     fade_vertical,
     ambient_background,
@@ -101,6 +102,15 @@ def _file_uri(path: Path, size: tuple[int, int]) -> str:
     return data_uri(image)
 
 
+def _content_image(path: Path) -> TemplateImage:
+    image = fit_width(read_rgba(path), 1240)
+    return TemplateImage(
+        uri=data_uri(image),
+        width=image.width,
+        height=image.height,
+    )
+
+
 def _logo_uri(platform_name: str) -> str:
     safe_name = "".join(ch for ch in platform_name.lower() if ch.isalnum() or ch in "_-")
     path = LOGO_DIR / f"{safe_name}.png"
@@ -162,10 +172,23 @@ async def _comment_templates(
 
 
 def _image_group(images: list[TemplateImage]) -> TemplateImageGroup:
+    if len(images) == 1:
+        return TemplateImageGroup(
+            images=(images[0],),
+            columns=1,
+            layout="single",
+        )
+    if len(images) == 2:
+        return TemplateImageGroup(
+            images=tuple(images),
+            columns=2,
+            layout="stacked",
+        )
     columns = 3 if len(images) >= 3 else 2
     return TemplateImageGroup(
         images=tuple(images[:9]),
         columns=columns,
+        layout="grid",
         hidden_count=max(0, len(images) - 9),
     )
 
@@ -196,9 +219,12 @@ async def _blocks(
                 continue
         if path is None:
             raise ValueError("图片块没有可用来源")
+        content_image = _content_image(path)
         pending.append(
             TemplateImage(
-                uri=_file_uri(path, (1240, 1240)),
+                uri=content_image.uri,
+                width=content_image.width,
+                height=content_image.height,
                 caption=block.caption,
             )
         )

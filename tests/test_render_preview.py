@@ -177,6 +177,48 @@ def test_card_copy_and_footer(tmp_path: Path) -> None:
     assert CARD_FOOTER == "Create by GsCore & Power by ParserUID"
 
 
+def test_tall_content_image_keeps_full_height(tmp_path: Path) -> None:
+    tall = _image(tmp_path / "tall.png", (560, 1400), (40, 90, 160))
+    card = PreviewCard(
+        platform_name="tieba",
+        platform_display_name="百度贴吧",
+        title="竖图完整显示",
+        blocks=(ImageBlock(tall),),
+    )
+
+    ready_card = asyncio.run(render_runtime.ensure_card_assets(card))
+    context = asyncio.run(prepare_context(ready_card))
+    _, _, environment = render_runtime.load_skin_pack("default")
+    html = environment.get_template("common.html").render(**context)
+
+    assert 'width="1240"' in html
+    assert 'height="3100"' in html
+    single_image_start = html.index('<div class="single-image">')
+    single_image_end = html.index("</div>", single_image_start)
+    assert "object-fit:cover" not in html[single_image_start:single_image_end]
+
+
+def test_two_content_images_stack_without_cropping(tmp_path: Path) -> None:
+    first = _image(tmp_path / "first.png", (560, 700), (40, 90, 160))
+    second = _image(tmp_path / "second.png", (560, 1400), (120, 60, 180))
+    card = PreviewCard(
+        platform_name="tieba",
+        platform_display_name="百度贴吧",
+        title="多图完整显示",
+        blocks=(ImageBlock(first), ImageBlock(second)),
+    )
+
+    ready_card = asyncio.run(render_runtime.ensure_card_assets(card))
+    context = asyncio.run(prepare_context(ready_card))
+    _, _, environment = render_runtime.load_skin_pack("default")
+    html = environment.get_template("common.html").render(**context)
+
+    assert 'class="stacked-images"' in html
+    assert 'height="1550"' in html
+    assert 'height="3100"' in html
+    assert '<div class="grid ' not in html
+
+
 def test_helpers_round_rect(tmp_path: Path) -> None:
     source_path = _image(tmp_path / "rect_src.png", (200, 200), (255, 0, 0))
     source = helpers.read_rgba(source_path)

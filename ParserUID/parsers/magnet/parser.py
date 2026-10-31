@@ -41,6 +41,8 @@ def format_size(size_bytes: float | int) -> str:
 
 def extract_screenshot_urls(response: MagnetInfoResponse) -> list[str]:
     urls: list[str] = []
+    if response.screenshots is None:
+        return urls
     for item in response.screenshots:
         url = item.screenshot.strip()
         if not url.startswith("https://"):

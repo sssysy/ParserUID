@@ -81,6 +81,14 @@ def fit_cover(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     return ImageOps.fit(image, size, method=Image.Resampling.LANCZOS)
 
 
+def fit_width(image: Image.Image, width: int) -> Image.Image:
+    """等比缩放到指定宽度，完整保留原图高度。"""
+    if image.width <= 0 or width <= 0:
+        raise ValueError("图片宽度必须大于 0")
+    height = max(1, round(image.height * width / image.width))
+    return image.resize((width, height), Image.Resampling.LANCZOS)
+
+
 def fit_contain(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     """等比缩放到指定尺寸内，不裁切图片。"""
     contained = ImageOps.contain(
