@@ -45,6 +45,11 @@ CONFIG_DEFAULT: dict[str, GSC] = {
         desc="关闭后，解析器调用 result() 时丢弃解析结果，不再发送媒体内容。",
         data=True,
     ),
+    "send_music_as_voice": GsBoolConfig(
+        title="音乐解析发送语音",
+        desc="开启后音乐解析结果以语音发送；关闭后以文件发送。",
+        data=True,
+    ),
     "send_trigger_feedback": GsBoolConfig(
         title="解析触发文字反馈",
         desc="开启后，解析链接命中并进入后台解析时，发送文字反馈。",
@@ -219,6 +224,11 @@ def render_preview_enabled() -> bool:
 def parse_result_enabled() -> bool:
     """返回是否发送解析器返回的结果内容。"""
     return bool(parser_config.get_config("send_parse_result").data)
+
+
+def music_as_voice_enabled() -> bool:
+    """返回音乐解析结果是否以语音形式发送。"""
+    return bool(parser_config.get_config("send_music_as_voice").data)
 
 
 def trigger_feedback_enabled() -> bool:

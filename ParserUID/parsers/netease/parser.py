@@ -7,71 +7,30 @@ from typing import ClassVar
 from pathlib import Path
 from collections.abc import Sequence
 
-import httpx
 import msgspec
 
-from gsuid_core.logger import logger
-
 from ..base import BaseParser, handle
-from .models import (
-    SongUrlItem,
-    SongUrlResponse,
-    SongLyricResponse,
-    SongDetailResponse,
-)
+from .media import resolve_audio
+from .types import QualityLevel, normalize_level
+from .detail import fetch_song
+from .models import SongLyricResponse
+from .request import NeteaseClient
 from ...sender import ContentItem
 from ...utils.models import Platform
 from ...utils.exceptions import ParseException
 
-API_BASE = "https://music.163.com/api"
-SONG_DETAIL_PATH = "/song/detail/"
-SONG_LYRIC_PATH = "/song/lyric"
-SONG_URL_PATH = "/song/enhance/player/url"
 MEDIA_HEADERS = {
     "Referer": "https://music.163.com/",
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/146.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)",
 }
-AUDIO_EXTENSIONS = frozenset({"flac", "wav", "m4a", "aac", "mp3"})
-QUALITY_CHOICES = ((999000, "lossless"), (320000, "exhigh"), (192000, "higher"), (128000, "standard"))
-
-
-def _format_duration(seconds: float) -> str:
-    total = max(0, int(seconds))
-    minutes, second = divmod(total, 60)
-    return f"{minutes:02d}:{second:02d}"
 
 
 class NeteaseParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(
-        name="netease",
-        display_name="网易云音乐",
-    )
-
-    async def _get_api(
-        self,
-        endpoint: str,
-        params: dict[str, str | int | float],
-    ) -> bytes:
-        client = await self.get_client()
-        try:
-            resp = await client.get(
-                f"{API_BASE}{endpoint}",
-                params=params,
-                headers=MEDIA_HEADERS,
-            )
-            if resp.status_code >= 400:
-                raise ParseException(f"网易云接口状态码 {resp.status_code}")
-            return resp.content
-        except httpx.HTTPError as exc:
-            raise ParseException(f"网易云接口请求失败：{exc}") from exc
+    platform: ClassVar[Platform] = Platform(name="netease", display_name="网易云音乐")
 
     @handle("163cn.tv", r"https?://[^\s]*163cn\.tv/[A-Za-z0-9]+")
     async def _parse_short_link(self, searched: re.Match[str]) -> Sequence[ContentItem]:
-        return await self.parse_with_redirect(searched.group(0))
+        return await self.parse_with_redirect(searched.group(0), headers=MEDIA_HEADERS)
 
     @handle(
         "music.163.com",
@@ -82,88 +41,57 @@ class NeteaseParser(BaseParser):
     )
     async def _parse_song(self, searched: re.Match[str]) -> Sequence[ContentItem]:
         groups = searched.groupdict()
-        song_id = groups.get("path_id") or groups.get("query_id")
+        song_id = groups["path_id"] or groups["query_id"]
         if not song_id:
             raise ParseException("无效的网易云歌曲链接")
         return await self._parse_song_id(song_id)
 
     async def _parse_song_id(self, song_id: str) -> Sequence[ContentItem]:
-        info_raw = await self._get_api(
-            SONG_DETAIL_PATH,
-            {"id": song_id, "ids": f"[{song_id}]"},
-        )
-        info_resp = msgspec.json.decode(info_raw, type=SongDetailResponse)
-        if info_resp.code != 200 or not info_resp.songs:
-            raise ParseException("网易云歌曲信息接口返回错误")
-
-        song = info_resp.songs[0]
-        title = song.name.strip() or "未知歌曲"
-        artist = " / ".join(value.name for value in song.artists if value.name.strip()) or "未知歌手"
-        duration = max(0.0, song.duration / 1000)
-
-        lyric = ""
-        try:
-            lyric_raw = await self._get_api(
-                SONG_LYRIC_PATH,
-                {"id": song_id, "lv": 1, "kv": 1, "tv": -1},
-            )
-            lyric_resp = msgspec.json.decode(lyric_raw, type=SongLyricResponse)
-            lyric = lyric_resp.lrc.lyric.strip()
-        except Exception as exc:
-            logger.warning(f"[网易云] 歌词获取失败 | song_id={song_id} | error={exc}")
-
-        audio_url = ""
-        level = "standard"
-        audio_item: SongUrlItem | None = None
-        for bitrate, candidate_level in QUALITY_CHOICES:
-            try:
-                url_raw = await self._get_api(
-                    SONG_URL_PATH,
-                    {"id": song_id, "ids": f"[{song_id}]", "br": bitrate},
-                )
-                url_resp = msgspec.json.decode(url_raw, type=SongUrlResponse)
-                candidate = url_resp.data[0] if url_resp.data else None
-                if candidate is not None and candidate.url:
-                    audio_url = candidate.url
-                    level = candidate.level or candidate_level
-                    audio_item = candidate
-                    break
-            except Exception as exc:
-                logger.warning(f"[网易云] 音源获取失败 | level={candidate_level} | error={exc}")
-
-        if not audio_url or audio_item is None:
-            raise ParseException("无法获取网易云音频地址")
-
-        cover_url = song.album.picUrl or None
-        target_audio_url = audio_url
-        extension = audio_item.type.lower() if audio_item.type.lower() in AUDIO_EXTENSIONS else "mp3"
+        client = await self.get_client()
+        netease = NeteaseClient(client)
+        song = await fetch_song(netease, song_id)
+        preferred = self._quality_preference()
+        audio = await resolve_audio(netease, song_id, preferred)
+        lyric = await self._fetch_lyric(netease, song_id)
 
         async def load_audio() -> Path:
-            filename = f"netease_{song_id}.{extension}"
             return await self.downloader.download_file(
-                target_audio_url,
-                filename=filename,
+                audio.url,
+                filename=f"netease_{song_id}_{audio.level}_{audio.br}.{audio.extension}",
                 headers=MEDIA_HEADERS,
                 proxy=self.proxy,
             )
 
-        audio = self.create_audio_content(loader=load_audio, duration=duration)
-        author = self.create_author(artist)
-        extra_info = (
-            f"音质: {level} | 码率: {audio_item.br // 1000}kbps | "
-            f"格式: {extension} | 时长: {_format_duration(duration)}"
-        )
-
+        item = self.create_audio_content(loader=load_audio, duration=song.duration)
+        trial_note = f" | 试听: {audio.trial_seconds} 秒" if audio.trial_seconds > 0 else ""
+        extra = f"音质: {audio.display_quality} | 格式: {audio.extension} | 时长: {song.duration_text}{trial_note}"
+        if song.album:
+            extra = f"{extra} | 专辑: {song.album}"
         await self.send_info(
-            title=title,
+            title=song.title,
             card_type="common",
-            author=author,
-            url=f"https://music.163.com/song/{song_id}",
-            cover_url=cover_url,
-            extra_info=extra_info,
+            author=song.author,
+            url=song.source_url,
+            cover_url=song.cover_url,
+            metrics=song.metrics,
+            extra_info=extra,
         )
-
-        items: list[ContentItem] = [audio]
+        contents: list[ContentItem] = [item]
         if lyric:
-            items.append(self.create_text_content(lyric))
-        return self.result(items)
+            contents.append(self.create_text_content(lyric))
+        return self.result(contents)
+
+    def _quality_preference(self) -> QualityLevel:
+        raw = self.get_config_value("quality").strip()
+        return normalize_level(raw) or "exhigh"
+
+    async def _fetch_lyric(self, client: NeteaseClient, song_id: str) -> str:
+        try:
+            raw, _ = await client.eapi(
+                "/api/song/lyric",
+                {"id": song_id, "tv": -1, "lv": -1, "rv": -1, "kv": -1},
+            )
+            response = msgspec.convert(raw, type=SongLyricResponse)
+        except (ParseException, msgspec.ValidationError, TypeError):
+            return ""
+        return response.lrc.lyric.strip()

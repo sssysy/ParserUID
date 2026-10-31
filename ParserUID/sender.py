@@ -18,6 +18,7 @@ from .config import (
     parser_config,
     default_skin_pack,
     max_file_size_bytes,
+    music_as_voice_enabled,
     max_audio_duration_seconds,
     max_video_duration_seconds,
 )
@@ -272,7 +273,10 @@ def _media_segment(path: Path, kind: MediaKind, file_name: str | None = None) ->
         case "video":
             return Message(type="video", data=file_uri)
         case "audio":
-            return Message(type="record", data=file_uri)
+            if music_as_voice_enabled():
+                return Message(type="record", data=file_uri)
+            name = file_name or path.name
+            return Message(type="file", data=f"{name}|{file_uri}")
         case "file":
             name = file_name or path.name
             return Message(type="file", data=f"{name}|{file_uri}")

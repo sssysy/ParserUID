@@ -8,6 +8,24 @@
       "type": "bool",
       "label": "使用代理",
       "default": false
+    },
+    "quality": {
+      "type": "select",
+      "label": "音质偏好",
+      "hint": "自动从所选档位向下尝试；登录后高解析档位才可能可用",
+      "options": [
+        "standard",
+        "higher",
+        "exhigh",
+        "lossless",
+        "hires",
+        "jyeffect",
+        "dolby",
+        "vivid",
+        "jymaster",
+        "sky"
+      ],
+      "default": "exhigh"
     }
   }
 }
