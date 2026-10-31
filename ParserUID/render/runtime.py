@@ -50,7 +50,7 @@ PREVIEW_LIGHT_BACKGROUND: Final = (248, 250, 252)
 PREVIEW_DARK_BACKGROUND: Final = (8, 9, 11)
 PREVIEW_LIGHT_DOT: Final = (148, 163, 184)
 PREVIEW_DARK_DOT: Final = (226, 232, 240)
-_RENDER_VERSION: Final = "17"
+_RENDER_VERSION: Final = "18"
 _SKIN_NAME_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 
 
@@ -266,6 +266,7 @@ async def ensure_card_assets(card: PreviewCard, *, proxy: str | None = None) -> 
     return PreviewCard(
         platform_name=card.platform_name,
         platform_display_name=card.platform_display_name,
+        platform_logo_path=card.platform_logo_path,
         title=card.title,
         text=card.text,
         author=author,
@@ -491,6 +492,7 @@ def _digest_card(card: PreviewCard, skin: str) -> str:
         _RENDER_VERSION,
         skin,
         card.platform_name,
+        _path_digest(card.platform_logo_path),
         card.title,
         card.text,
         _source_digest(card.cover_path, card.cover_url),

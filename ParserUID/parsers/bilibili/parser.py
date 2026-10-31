@@ -1159,6 +1159,7 @@ class BilibiliParser(BaseParser):
         return PreviewCard(
             platform_name=self.platform.name,
             platform_display_name=self.platform.display_name,
+            platform_logo_path=self.logo_path,
             title=orig.title or "原动态",
             text=orig.text or orig.title or "",
             author=author,

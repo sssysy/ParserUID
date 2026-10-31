@@ -13,9 +13,9 @@ from ...helpers import (
     icon,
     circle,
     data_uri,
-    fit_cover,
     fit_width,
     read_rgba,
+    fit_contain,
     fade_vertical,
     ambient_background,
     empty_image_placeholder,
@@ -35,7 +35,6 @@ from ....utils.exceptions import DownloadException
 CARD_WIDTH = 620
 CARD_OUTPUT_WIDTH = 1000
 VIDEO_WIDTH = 1000
-LOGO_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "logos"
 
 
 async def _download_with_headers(
@@ -112,7 +111,7 @@ async def _avatar_data(author: Author | None, size: int, *, proxy: str | None) -
 
 def _file_uri(path: Path, size: tuple[int, int]) -> str:
     image = read_rgba(path)
-    image = fit_cover(image, size)
+    image = fit_contain(image, size)
     return data_uri(image)
 
 
@@ -125,10 +124,8 @@ def _content_image(path: Path) -> TemplateImage:
     )
 
 
-def _logo_uri(platform_name: str) -> str:
-    safe_name = "".join(ch for ch in platform_name.lower() if ch.isalnum() or ch in "_-")
-    path = LOGO_DIR / f"{safe_name}.png"
-    if not path.is_file():
+def _logo_uri(path: Path | None) -> str:
+    if path is None or not path.is_file():
         return ""
     return _file_uri(path, (64, 64))
 
@@ -325,7 +322,7 @@ async def prepare_template_card(
     )
     return TemplateCard(
         platform_display_name=card.platform_display_name,
-        platform_logo_uri=_logo_uri(card.platform_name),
+        platform_logo_uri=_logo_uri(card.platform_logo_path),
         title=card.title,
         text=card.text,
         author_name=author_name,

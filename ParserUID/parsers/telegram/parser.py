@@ -348,14 +348,14 @@ class TelegramParser(BaseParser):
         metrics.extend(Metric(label=item.label, value=item.count) for item in post.reactions)
         return tuple(metrics)
 
-    @staticmethod
-    def _repost(post: TelegramPost) -> PreviewCard | None:
+    def _repost(self, post: TelegramPost) -> PreviewCard | None:
         reply = post.reply
         if reply is None:
             return None
         return PreviewCard(
-            platform_name="telegram",
-            platform_display_name="Telegram",
+            platform_name=self.platform.name,
+            platform_display_name=self.platform.display_name,
+            platform_logo_path=self.logo_path,
             title="引用消息",
             text=reply.text,
             author=Author(name=reply.name),

@@ -93,7 +93,17 @@ class BaseParser:
         self._curl_client_proxy: str | None = None
         self._curl_client_impersonate: str | None = None
         self._handlers: dict[str, tuple[re.Pattern[str], HandlerFunc]] = {}
+        self._logo_path: Path | None = None
         self._collect_handlers()
+
+    @property
+    def logo_path(self) -> Path | None:
+        """返回解析器包根目录中的 logo.png；未提供时为 None。"""
+        return self._logo_path
+
+    def set_logo_path(self, path: Path | None) -> None:
+        """由注册表注入经校验的包内 logo 路径。"""
+        self._logo_path = path
 
     def get_config_value(self, key: str, default: str = "") -> str:
         """安全读取解析器专属用户配置项字符串。"""
@@ -270,6 +280,7 @@ class BaseParser:
         card = PreviewCard(
             platform_name=self.platform.name,
             platform_display_name=self.platform.display_name,
+            platform_logo_path=self.logo_path,
             title=title,
             text=text,
             author=author,

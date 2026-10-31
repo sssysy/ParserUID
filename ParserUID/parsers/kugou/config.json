@@ -8,6 +8,32 @@
       "type": "bool",
       "label": "使用代理",
       "default": false
+    },
+    "standard_cookie": {
+      "type": "text",
+      "label": "普通版 Cookie",
+      "hint": "普通版帐号 Cookie；支持 token/userid 或 t/KugooID 字段",
+      "secret": true,
+      "default": ""
+    },
+    "concept_cookie": {
+      "type": "text",
+      "label": "概念版 Cookie",
+      "hint": "概念版帐号 Cookie；与普通版 token 不通用",
+      "secret": true,
+      "default": ""
+    },
+    "use_concept_api": {
+      "type": "bool",
+      "label": "使用概念版 API",
+      "hint": "开启后使用概念版 appid、签名、取流参数和概念版 Cookie",
+      "default": false
+    },
+    "try_concept_vip": {
+      "type": "bool",
+      "label": "概念版尝试获取 VIP 再解析",
+      "hint": "仅概念版 API 生效；无会员时尝试一次，无论成败进入 24 小时内存 CD，失败不阻断解析",
+      "default": false
     }
   }
 }

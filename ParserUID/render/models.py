@@ -83,6 +83,7 @@ class PreviewCard:
     platform_name: str
     platform_display_name: str
     title: str
+    platform_logo_path: Path | None = None
     text: str = ""
     author: Author | None = None
     timestamp: str | None = None

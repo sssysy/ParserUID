@@ -95,6 +95,8 @@
 | [Wuyi 无疑](https://github.com/KimigaiiWuyi) | 框架作者 |
 | [gsuid_core](https://github.com/Genshin-bots/gsuid_core) | 插件依赖框架 |
 | [karin-plugin-kkk](https://github.com/ikenxuan/karin-plugin-kkk) | 渲染卡片参考 |
+| [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) | 酷狗音乐解析 |
 | [astrbot_plugin_parser](https://github.com/Zhalslar/astrbot_plugin_parser) | 移植插件上游项目 |
 | [nonebot-plugin-parser-lite](https://github.com/sokoko-org/nonebot-plugin-parser-lite) | 大部分接口参考 |
 | [astrbot_plugin_parser_plus](https://github.com/sssysy/astrbot_plugin_parser_plus) | 该项目移植自本人此 Astrbot 插件 |
+| [NeteaseCloudMusicApiEnhanced](https://github.com/neteasecloudmusicapienhanced/api-enhanced) | 网易云解析 |

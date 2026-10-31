@@ -20,6 +20,7 @@ from ..parsers.config import (
 )
 
 RuleTuple: TypeAlias = tuple[str, re.Pattern[str], BaseParser]
+LOGO_FILENAME = "logo.png"
 
 
 class ParserMatchResult:
@@ -139,31 +140,23 @@ def _import_parser_class(
     return parser_cls
 
 
-def _import_parser_commands(dir_path: Path, module_name: str) -> bool:
-    """加载解析器包内可选命令模块，允许其通过 SV 注册命令。"""
-    command_file = dir_path / "init.py"
-    if not command_file.is_file():
-        return True
-
+def get_parser_logo_path(dir_path: Path) -> Path | None:
+    """只接受解析器包根目录内的 logo.png。"""
+    logo_path = dir_path / LOGO_FILENAME
+    if not logo_path.is_file():
+        return None
     try:
-        spec = importlib.util.spec_from_file_location(
-            f"{module_name}.init",
-            command_file,
-        )
-        if spec is None or spec.loader is None:
-            logger.warning(f"[Parser·注册] 命令模块无有效加载器 | name={dir_path.name}")
-            return False
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[f"{module_name}.init"] = module
-        spec.loader.exec_module(module)
-    except Exception as exc:
+        resolved = logo_path.resolve(strict=True)
+        root = dir_path.resolve(strict=True)
+    except OSError as exc:
         logger.warning(
-            f"[Parser·注册] 命令模块导入失败 | name={dir_path.name} | error={type(exc).__name__}",
+            f"[Parser·注册] logo 路径无效 | name={dir_path.name} | error={type(exc).__name__}",
         )
-        return False
-
-    logger.info(f"[Parser·注册] 命令模块加载完成 | name={dir_path.name}")
-    return True
+        return None
+    if resolved.parent != root:
+        logger.warning(f"[Parser·注册] logo 必须位于解析器包根目录 | name={dir_path.name}")
+        return None
+    return resolved
 
 
 async def load_registry() -> RegistrySnapshot:
@@ -222,9 +215,6 @@ async def load_registry() -> RegistrySnapshot:
             if has_conflict:
                 continue
 
-            if not _import_parser_commands(child, f"{module_prefix}.{child.name}"):
-                continue
-
             discovered_names.add(child.name)
             for kw, _ in specs:
                 registered_keywords[kw] = child.name
@@ -235,6 +225,7 @@ async def load_registry() -> RegistrySnapshot:
 
             try:
                 instance = parser_cls(config=user_config)
+                instance.set_logo_path(get_parser_logo_path(child))
             except Exception as exc:
                 detail = f" | attribute={exc.name}" if isinstance(exc, AttributeError) and exc.name else ""
                 logger.warning(

@@ -246,6 +246,7 @@ class XParser(BaseParser):
         return PreviewCard(
             platform_name=self.platform.name,
             platform_display_name=self.platform.display_name,
+            platform_logo_path=self.logo_path,
             title="引用推文",
             text="\n".join(desc_lines),
             author=self._author(quoted),

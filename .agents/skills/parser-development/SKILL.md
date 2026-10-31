@@ -4,7 +4,7 @@ description: >
   当用户要求为 ParserUID 新增、重写、审查或调试平台解析器时触发。
   适用于创建解析器包、编写 @handle 链接匹配、实现平台 API 请求、
   构造 Description 与有序媒体结果、调整解析器 config.json、排查注册冲突、
-  在解析器包 init.py 中注册命令，以及修改解析器相关测试。
+  在解析器包 __init__.py 中注册命令，以及修改解析器相关测试。
 ---
 
 # ParserUID 平台解析器开发
@@ -17,7 +17,7 @@ description: >
 | 任务 | 文档 |
 |------|------|
 | 新增或重写解析器包、实现 `BaseParser` 与 `@handle` | [references/parser-package.md](references/parser-package.md) |
-| 为解析器包添加 `init.py` 命令、登录、刷新或配置操作 | [references/parser-package.md](references/parser-package.md#解析器包内命令initpy) |
+| 为解析器包添加 `__init__.py` 命令、登录、刷新或配置操作 | [references/parser-package.md](references/parser-package.md#解析器包内命令__init__py) |
 | 修改 `config.json`、用户配置和网页配置页字段 | [references/configuration.md](references/configuration.md) |
 | 提交前检查注册、解析、发送、安全和测试 | [references/checklist.md](references/checklist.md) |
 
@@ -30,7 +30,6 @@ ParserUID 是 GsCore 插件，不直接依赖 AstrBot 运行时。
 ```text
 ParserUID/parsers/<name>/
 ├── __init__.py       # 导出 PARSER
-├── init.py           # 可选：解析器自己的 GsCore 命令
 ├── config.json       # 默认值和字段定义
 ├── parser.py         # BaseParser 子类与 @handle 入口
 ├── models.py         # 平台专属 msgspec.Struct 数据模型
@@ -42,7 +41,6 @@ ParserUID/parsers/<name>/
 ```text
 data/ParserUID/thirdparty/parsers/<name>/
 ├── __init__.py
-├── init.py
 ├── config.json
 ├── parser.py
 ├── models.py
@@ -50,8 +48,7 @@ data/ParserUID/thirdparty/parsers/<name>/
 ```
 
 目录名、`config.json.name`、`PARSER.platform.name` 必须完全一致。
-注册中心导入解析器包的 `__init__.py`，并在身份和关键词校验通过后执行可选的
-`init.py`；不会逐个扫描其他包内模块。
+注册中心只导入解析器包的 `__init__.py`，不逐个扫描其他包内模块。
 
 新增平台时不得修改：
 
@@ -91,7 +88,8 @@ data/ParserUID/thirdparty/parsers/<name>/
 
 ## 解析器命令
 
-解析器可以在自己的包目录内提供 `init.py`，用 GsCore 的 `SV` 注册该平台专属命令：
+解析器可以在自己的包目录内用 `__init__.py`，通过 GsCore 的 `SV`
+注册该平台专属命令：
 
 ```python
 from gsuid_core.sv import SV
@@ -106,9 +104,11 @@ async def login(bot: Bot, ev: Event) -> None:
     ...
 ```
 
-- `init.py` 是可选文件，只在解析器身份和链接关键词校验通过后被加载一次。
-- 命令模块由 `utils/registry.py` 自动发现。不得在 `parsers/__init__.py`、
-  `parser.py` 或平台清单中手工导入 `init.py`。
+- `__init__.py` 是解析器包入口，注册中心只导入该文件；命令与 `PARSER`
+  在同一个入口中声明。
+- 不得新建字面的 `init.py`。它既不是 GsCore 插件入口，也不是解析器入口，
+  注册器不会加载。
+- 不得在 `parsers/__init__.py`、`parser.py` 或平台清单中手工导入平台命令。
 - 命令通过 `SV` 的 `on_command` / `on_fullmatch` / `on_prefix` 等触发器注册；
   自动链接解析仍只能走唯一的 `@handle` + `on_parser_message` 链路。
 - 命令处理函数使用 GsCore 的 `Bot` 与 `Event`，可直接用 `bot.send()` 回复命令结果；
@@ -119,11 +119,12 @@ async def login(bot: Bot, ev: Event) -> None:
   写入 `data/ParserUID/cookies/` 并使用原子替换保存。
 - 命令的权限、`area`、前缀和 `block` 必须显式声明；登录、写入凭证等管理命令默认
   使用 `pm=0`，除非用户明确要求其他权限。
-- `init.py` 导入阶段只注册触发器，不发起网络请求、不阻塞启动、不启动无回收的任务。
+- `__init__.py` 导入阶段只导出 `PARSER` 和注册触发器，不发起网络请求、
+  不阻塞启动、不启动无回收的任务。
 - 命令失败只向用户返回简短原因，不记录或回显 Cookie、Token、签名和完整响应。
 
 完整规则与示例参见
-[references/parser-package.md](references/parser-package.md#解析器包内命令initpy)。
+[references/parser-package.md](references/parser-package.md#解析器包内命令__init__py)。
 
 ## 注册与匹配
 
@@ -134,9 +135,8 @@ async def login(bot: Bot, ev: Event) -> None:
 3. 校验目录名、配置名和平台名三者一致。
 4. 从 `PARSER` 类收集 `@handle` 的关键词和正则。
 5. 检查关键词冲突；冲突时拒绝注册并记录两个平台。
-6. 身份和关键词校验通过后，加载可选的 `init.py` 命令模块。
-7. 读取或创建 `data/ParserUID/parser_config/<name>.json`。
-8. 只实例化已启用的解析器，生成只读注册快照。
+6. 读取或创建 `data/ParserUID/parser_config/<name>.json`。
+7. 只实例化已启用的解析器，生成只读注册快照。
 
 匹配规则：
 

@@ -446,6 +446,7 @@ class WeiboParser(BaseParser):
         return PreviewCard(
             platform_name=self.platform.name,
             platform_display_name=self.platform.display_name,
+            platform_logo_path=self.logo_path,
             title="转发微博",
             text=retweet_text,
             author=self._author(retweeted),

@@ -7,7 +7,6 @@
 ```text
 ParserUID/parsers/example/
 ├── __init__.py
-├── init.py
 ├── config.json
 ├── parser.py
 └── models.py
@@ -94,23 +93,22 @@ class ExampleParser(BaseParser):
 - 不在包入口启动浏览器、调度器或长生命周期任务。
 - 不逐个导入包内所有模块作为注册手段。
 
-## 解析器包内命令（`init.py`）
+## 解析器包内命令（`__init__.py`）
 
-解析器需要自己的登录、刷新、切换账号或维护操作时，在包目录内创建可选的 `init.py`。
-注册中心在解析器 manifest、`PARSER` 身份和链接关键词都通过校验后执行该文件；
-解析器未启用也会注册命令，但不会实例化解析器。
+解析器需要自己的登录、刷新、切换账号或维护操作时，直接在解析器包已有的
+`__init__.py` 中注册命令。注册中心只导入该入口文件；解析器未启用也会注册命令，
+但不会实例化解析器。
 
 最小结构：
 
 ```text
 ParserUID/parsers/example/
 ├── __init__.py
-├── init.py
 ├── config.json
 └── parser.py
 ```
 
-内置解析器的 `init.py` 必须使用相对导入：
+内置解析器的 `__init__.py` 必须使用相对导入：
 
 ```python
 from __future__ import annotations
@@ -121,9 +119,11 @@ from gsuid_core.sv import SV
 from gsuid_core.bot import Bot
 from gsuid_core.models import Event
 
-from .parser import ExampleParser
 from .auth import ExampleAuthError
+from .parser import ExampleParser
 from ...utils.exceptions import sanitize_error_text
+
+PARSER = ExampleParser
 
 sv = SV("示例平台解析器命令", pm=0, area="ALL")
 _login_lock = asyncio.Lock()
@@ -151,15 +151,15 @@ async def login(bot: Bot, ev: Event) -> None:
 
 ### 发现与导入
 
-- 文件名固定为小写 `init.py`。不是 GsCore 插件入口 `__init__.py`，也不使用
-  `__full__.py`、`__nest__.py`。
-- 注册器只从解析器包的直接目录读取 `init.py`，不接受用户提供的任意文件路径。
+- 命令写在解析器包已有的 `__init__.py`，与 `PARSER` 一起导出。
+- 不要创建字面的 `init.py`。它不会作为解析器入口被加载，且违反项目结构约定。
+- 注册器只从解析器包的直接目录读取 `__init__.py`，不接受用户提供的任意文件路径。
 - 第三方解析器允许按加载器提供的模块命名空间使用兼容导入方式；内置解析器必须遵守
   相对导入红线。
-- `init.py` 导入失败时拒绝该解析器的命令模块并记录错误；该失败不应让其他解析器
-  无法注册。导入成功只代表触发器已注册，不代表命令一定可用。
+- `__init__.py` 导入失败时拒绝该解析器并记录错误；该失败不应让其他解析器无法注册。
+  导入成功只代表 `PARSER` 和触发器已注册，不代表命令一定可用。
 - 不要从 `parsers/__init__.py`、`parsers/base.py`、`parser.py` 或插件全局配置中
-  手工导入 `init.py`。
+  手工导入平台命令模块。
 
 ### 触发器与命令约定
 
@@ -172,6 +172,9 @@ async def login(bot: Bot, ev: Event) -> None:
   触发器阻断本命令。
 - 命令处理函数签名固定为 `async def handler(bot: Bot, ev: Event) -> None`。使用 `Bot`
   和 `Event`，不直接依赖 `_Bot`。
+- 命令关键词会受插件 `Plugins(prefix=..., allow_empty_prefix=...)` 影响：注册后
+  触发器键可能带前缀（例如 `blogin` 变为 `psrblogin`）。验证时按后缀匹配，
+  不要假设裸命令名；用户实际触发方式以当前插件前缀配置为准。
 - 命令的直接反馈使用 `bot.send()`；这是命令模块允许直接发送的边界，不得把
   `bot.send()` 带进 `parser.py` 的自动解析处理函数。
 - 自动链接解析仍只走 `parser.py` 中的 `@handle` 和唯一 `on_parser_message` 入口。
@@ -228,7 +231,7 @@ else:
 
 至少离线验证：
 
-1. 临时解析器目录中的 `init.py` 能被注册器执行，命令触发器出现在对应 `SV` 中。
+1. 临时解析器目录中的 `__init__.py` 能被注册器执行，命令触发器出现在对应 `SV` 中。
 2. 解析器停用时命令仍可触发，且不会意外创建或泄漏解析器实例。
 3. 命令失败时只发送安全提示，成功时只写数据目录中的凭证和用户配置。
 4. 登录、刷新和关闭路径都有明确的资源回收。
