@@ -16,12 +16,12 @@ from PIL import Image, ImageFilter
 from gsuid_core.logger import logger
 
 from ..base import BaseParser, handle
-from .models import (
-    MagnetInfoResponse,
-)
+from .models import MagnetInfoResponse
 from ...sender import ContentItem
 from ...utils.models import Platform, ImageContent
-from ...utils.exceptions import ParseException
+from ...render.models import CardBlock, ImageBlock
+from ...utils.helpers import build_image_blocks
+from ...utils.exceptions import ParseException, DownloadException
 
 API_URL = "https://whatslink.info/api/v1/link"
 SCREENSHOT_HOST = "whatslink.info"
@@ -95,11 +95,41 @@ class MagnetParser(BaseParser):
 
     @staticmethod
     def _blur(image_path: Path, radius: int = 15) -> Path:
-        output_path = image_path.with_name(f"{image_path.stem}_blur{image_path.suffix or '.jpg'}")
+        output_path = image_path.with_name(f"{image_path.stem}_blur.jpg")
+        if output_path.is_file():
+            return output_path
         with Image.open(image_path) as image:
             blurred = image.filter(ImageFilter.GaussianBlur(radius=radius))
-            blurred.save(output_path)
+            blurred.convert("RGB").save(output_path, format="JPEG")
         return output_path
+
+    async def _prepare_blurred_blocks(
+        self,
+        image_urls: list[str],
+    ) -> tuple[Path | None, tuple[ImageBlock, ...]]:
+        """为模糊模式预先下载并高斯模糊卡片缩略图。"""
+        limit = self.card_image_limit
+        selected_urls = image_urls[:limit] if limit > 0 else image_urls
+        headers = {"Referer": API_URL}
+        blocks: list[ImageBlock] = []
+        cover_path: Path | None = None
+
+        for url in selected_urls:
+            try:
+                raw_path = await self.downloader.download_image(
+                    url,
+                    headers=headers,
+                    proxy=self.proxy,
+                )
+                blurred_path = await asyncio.to_thread(self._blur, raw_path)
+                if cover_path is None:
+                    cover_path = blurred_path
+                blocks.append(ImageBlock(path=blurred_path))
+            except (DownloadException, OSError, ValueError) as exc:
+                logger.warning(f"[磁力] 预览图下载或模糊失败：{exc}")
+                continue
+
+        return cover_path, tuple(blocks)
 
     def _image_contents(
         self,
@@ -144,12 +174,24 @@ class MagnetParser(BaseParser):
         image_urls = extract_screenshot_urls(data)
         mode = self.get_config_value("image_send_mode", "original")
 
+        cover: Path | None = None
+        cover_url: str | None = None
+        blocks: tuple[CardBlock, ...] = ()
+        if image_urls and mode == "original":
+            cover_url = next(iter(image_urls), None)
+            blocks = build_image_blocks(image_urls, limit=self.card_image_limit)
+        elif image_urls and mode == "blur":
+            cover, blocks = await self._prepare_blurred_blocks(image_urls)
+
         text = f"标题：{title}\n\n磁链类型：{file_type}\n\n文件大小：{size}"
         await self.send_info(
             title=title,
             card_type="common",
             text=text,
             url=magnet,
+            cover=cover,
+            cover_url=cover_url,
+            blocks=blocks,
             extra_info=f"预览图：{len(image_urls)} 张",
         )
 

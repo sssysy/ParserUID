@@ -123,8 +123,10 @@
                     <div class="repost-time">{{ card.timestamp or "" }}</div>
                 </div>
             </div>
-            <div class="repost-title">{{ card.title }}</div>
+            {% if card.title %}<div class="repost-title">{{ card.title }}</div>{% endif %}
             <div class="repost-copy">{{ card.text or card.title }}</div>
+            {{ render_hero(card) }}
+            {{ render_body(card.blocks) }}
         </div>
     {% endif %}
 {%- endmacro %}

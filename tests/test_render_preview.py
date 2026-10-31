@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import io
 import json
-import asyncio
 import base64
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -22,10 +22,9 @@ from ParserUID.render.models import (
     PreviewCard,
     CommentReply,
 )
-from ParserUID.render.template_data import TemplateCard
 from ParserUID.render.runtime import render_preview
 from ParserUID.utils.exceptions import DownloadException
-from ParserUID.render.template_data import CARD_FOOTER
+from ParserUID.render.template_data import CARD_FOOTER, TemplateCard
 from ParserUID.render.pack.default.context import prepare_context
 
 
@@ -182,6 +181,33 @@ def test_card_copy_and_footer(tmp_path: Path) -> None:
     assert "ID:" not in common
     assert ">ID " not in video
     assert CARD_FOOTER == "Create by GsCore & Power by ParserUID"
+
+
+def test_extremely_tall_content_image_caps_at_safe_render_limit(tmp_path: Path) -> None:
+    extreme_tall = _image(tmp_path / "extreme.png", (1280, 11669), (40, 90, 160))
+    card = PreviewCard(
+        platform_name="xiaoheihe",
+        platform_display_name="小黑盒",
+        title="超长图安全渲染",
+        blocks=(ImageBlock(extreme_tall),),
+    )
+
+    path = asyncio.run(render_preview(card))
+    _assert_png(path)
+    with Image.open(path) as image:
+        assert image.height == render_runtime.MAX_RENDER_EDGE
+        dot_pixel = image.convert("RGBA").getpixel((image.width // 2, image.height - 48))
+        assert dot_pixel[:3] == render_runtime.PREVIEW_LIGHT_DOT
+
+
+def test_short_card_does_not_get_cutoff_dots(tmp_path: Path) -> None:
+    card = _card(tmp_path)
+
+    path = asyncio.run(render_preview(card))
+    with Image.open(path) as image:
+        assert image.height < render_runtime.MAX_RENDER_EDGE
+        dot_pixel = image.convert("RGBA").getpixel((image.width // 2, image.height - 48))
+        assert dot_pixel[:3] != render_runtime.PREVIEW_LIGHT_DOT
 
 
 def test_tall_content_image_keeps_full_height(tmp_path: Path) -> None:

@@ -51,7 +51,7 @@ class TemplateImage:
 class TemplateImageGroup:
     images: tuple[TemplateImage, ...]
     columns: int
-    layout: Literal["single", "grid", "stacked"]
+    layout: Literal["single", "grid", "stacked", "slices"]
     hidden_count: int = 0
     kind: ClassVar[Literal["image_group"]] = "image_group"
 

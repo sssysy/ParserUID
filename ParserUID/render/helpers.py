@@ -11,6 +11,7 @@ from PIL import Image, ImageOps, ImageDraw, ImageFilter, ImageEnhance
 
 MAX_SOURCE_BYTES = 16 * 1024 * 1024
 MAX_SOURCE_EDGE = 2400
+MAX_RENDER_EDGE = 8192
 
 IconName = Literal[
     "eye",
@@ -32,6 +33,12 @@ def encode_png(image: Image.Image) -> bytes:
 
 def data_uri(image: Image.Image) -> str:
     """返回 PNG 格式的 data URI，不暴露本地路径。"""
+    if max(image.size) > MAX_RENDER_EDGE:
+        image = image.copy()
+        image.thumbnail(
+            (MAX_RENDER_EDGE, MAX_RENDER_EDGE),
+            Image.Resampling.LANCZOS,
+        )
     encoded = encode_png(image)
     return f"data:image/png;base64,{base64.b64encode(encoded).decode('ascii')}"
 

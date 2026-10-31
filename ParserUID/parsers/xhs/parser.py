@@ -405,6 +405,8 @@ class XhsParser(BaseParser):
             metrics=note.metrics,
             blocks=build_image_blocks(image_urls, limit=self.card_image_limit),
         )
+        if note.text:
+            contents.insert(0, self.create_text_content(note.text))
         return self.result(contents)
 
     async def _fetch_author_profile(self, user_id: str | None) -> XhsUserPageData | None:

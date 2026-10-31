@@ -138,6 +138,16 @@ async def _response_json(response: httpx.Response) -> dict[str, object]:
     return {str(key): value for key, value in payload.items()}
 
 
+def _status_blocks(status: WeiboStatus, *, limit: int) -> tuple[CardBlock, ...]:
+    """微博动态正文常先图后文，卡片按原始顺序渲染图文。"""
+    if not status.pics:
+        return ()
+    return build_card_blocks(
+        [("image", pic.image_url) for pic in status.pics],
+        limit=limit,
+    )
+
+
 class WeiboParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name="weibo", display_name="微博")
 
@@ -426,16 +436,6 @@ class WeiboParser(BaseParser):
                 blocks=_status_blocks(status, limit=self.card_image_limit),
             )
         return self.result(contents)
-
-
-def _status_blocks(status: WeiboStatus, *, limit: int) -> tuple[CardBlock, ...]:
-    """微博动态正文常先图后文，卡片按原始顺序渲染图文。"""
-    if not status.pics:
-        return ()
-    return build_card_blocks(
-        [("image", pic.image_url) for pic in status.pics],
-        limit=limit,
-    )
 
     async def _build_repost_card(self, status: WeiboStatus) -> PreviewCard | None:
         if status.retweeted is None or not bool(self.get_config_value("include_reposts", "true").lower() == "true"):

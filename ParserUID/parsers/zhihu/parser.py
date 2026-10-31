@@ -233,6 +233,7 @@ class ZhihuParser(BaseParser):
         bodies, text = await self._content(article.content, url, "article")
         comments = await self._load_comments(f"articles/{article_id}", url)
         author = self._author(article.author)
+        blocks = _card_blocks(bodies, limit=self.card_image_limit)
         metrics = _metrics(
             ("赞同", article.reaction.statistics.up_vote_count),
             ("评论", article.reaction.statistics.comment_count),
@@ -258,12 +259,12 @@ class ZhihuParser(BaseParser):
             title=article.title or "知乎文章",
             card_type="common",
             author=author,
-            text=_card_text(text, article.excerpt),
+            text="" if blocks else _card_text(text, article.excerpt),
             url=url,
             extra_info=_card_info("文章", *[(m.label, m.value) for m in metrics]),
             metrics=metrics,
             comments=comments,
-            blocks=_card_blocks(bodies, limit=self.card_image_limit),
+            blocks=blocks,
         )
         return self.result(contents)
 
@@ -273,6 +274,7 @@ class ZhihuParser(BaseParser):
         bodies, text = await self._content(answer.content, url, "answer")
         comments = await self._load_comments(f"answers/{answer_id}", url)
         author = self._author(answer.author)
+        blocks = _card_blocks(bodies, limit=self.card_image_limit)
         metrics = _metrics(
             ("赞同", answer.reaction.statistics.up_vote_count),
             ("评论", answer.reaction.statistics.comment_count),
@@ -296,12 +298,12 @@ class ZhihuParser(BaseParser):
             title=title,
             card_type="common",
             author=author,
-            text=_card_text(text, answer.excerpt),
+            text="" if blocks else _card_text(text, answer.excerpt),
             url=url,
             extra_info=_card_info("回答", *[(m.label, m.value) for m in metrics]),
             metrics=metrics,
             comments=comments,
-            blocks=_card_blocks(bodies, limit=self.card_image_limit),
+            blocks=blocks,
         )
         return self.result(contents)
 
@@ -327,6 +329,7 @@ class ZhihuParser(BaseParser):
             ("关注", question.follower_count),
             ("浏览", question.visit_count),
         )
+        blocks = _card_blocks([*bodies, *answer_blocks], limit=self.card_image_limit)
         contents = self._contents(
             [
                 *bodies,
@@ -351,12 +354,12 @@ class ZhihuParser(BaseParser):
             title=question.title or "知乎问题",
             card_type="common",
             author=author if first_answer is None else self._author(first_answer.author),
-            text=_card_text(text, question.detail, question.excerpt, answer_text),
+            text="" if blocks else _card_text(text, question.detail, question.excerpt, answer_text),
             url=url,
             extra_info=_card_info("问题", *[(m.label, m.value) for m in metrics]),
             metrics=metrics,
             comments=comments,
-            blocks=_card_blocks([*bodies, *answer_blocks], limit=self.card_image_limit),
+            blocks=blocks,
         )
         return self.result(contents)
 
@@ -371,7 +374,8 @@ class ZhihuParser(BaseParser):
         author = self._author(author_data if isinstance(author_data, dict) else {})
         body_html = str(payload.get("content_html") or payload.get("contentHtml") or payload.get("content") or "")
         bodies, text = await self._content(body_html, url, "pin")
-        card_title = _summary(body_html, text) or "知乎想法"
+        card_title = "知乎想法"
+        blocks = _card_blocks(bodies, limit=self.card_image_limit)
         contents = self._contents(
             bodies,
             header_text=self._header(
@@ -386,17 +390,17 @@ class ZhihuParser(BaseParser):
             self._meta_header(title=card_title, kind="想法"),
         )
         await self.send_info(
-            title=_summary(body_html, text) or "知乎想法",
+            title=card_title,
             card_type="common",
             author=author,
-            text=_card_text(text, body_html),
+            text="" if blocks else _card_text(text, body_html),
             url=url,
             extra_info=_card_info("想法"),
             metrics=_metrics(
                 ("赞同", payload.get("voteup_count") or payload.get("voteupCount")),
                 ("评论", payload.get("comment_count") or payload.get("commentCount")),
             ),
-            blocks=_card_blocks(bodies, limit=self.card_image_limit),
+            blocks=blocks,
         )
         return self.result(contents)
 

@@ -49,10 +49,11 @@ from .models import (
     decode_favorite,
 )
 from .comment import comment_limit, decode_comments as decode_card_comments
+from ...sender import ContentItem
 from ...utils.ffmpeg import merge_av
 from ...utils.models import Platform, MediaContent
 from ...render.models import Author, Metric, Comment, PreviewCard
-from ...utils.helpers import build_image_blocks
+from ...utils.helpers import build_card_blocks, build_image_blocks
 from ...utils.exceptions import ParseException
 
 if TYPE_CHECKING:
@@ -846,6 +847,23 @@ class BilibiliParser(BaseParser):
         if not isinstance(item, dict):
             raise ParseException("图文内容为空")
         dynamic = self._build_dynamic(item, opus_id)
+        if not dynamic.cover and dynamic.is_article:
+            try:
+                dyn_payload = await self._get_json(
+                    self.API_DYNAMIC,
+                    params={"id": opus_id},
+                    error="",
+                )
+                if dyn_payload.get("code") == 0 and isinstance(dyn_payload.get("data"), dict):
+                    dyn_item = dyn_payload["data"].get("item")
+                    if isinstance(dyn_item, dict):
+                        dyn_content = self._build_dynamic(dyn_item, opus_id)
+                        if dyn_content.cover:
+                            dynamic.cover = dyn_content.cover
+                        if not dynamic.images and dyn_content.images:
+                            dynamic.images = dyn_content.images
+            except ParseException:
+                logger.warning(f"[哔哩哔哩] 专栏头图补全失败 | opus_id={opus_id}")
         return await self._finish_dynamic(dynamic)
 
     @staticmethod
@@ -873,31 +891,84 @@ class BilibiliParser(BaseParser):
         return extract_rich_text(value.get("rich_text_nodes") or value.get("nodes")) or str(value.get("text") or "")
 
     @staticmethod
-    def _dynamic_content(modules: dict[str, dict[str, object]]) -> tuple[str, list[str]]:
-        texts: list[str] = []
+    def _extract_paragraph_text(paragraph: dict[str, object]) -> str:
+        text_obj = paragraph.get("text")
+        if isinstance(text_obj, dict):
+            t = extract_rich_text(text_obj.get("rich_text_nodes") or text_obj.get("nodes")) or str(
+                text_obj.get("text") or ""
+            )
+            if t.strip():
+                return t.strip()
+        elif isinstance(text_obj, str) and text_obj.strip():
+            return text_obj.strip()
+
+        list_obj = paragraph.get("list")
+        if isinstance(list_obj, dict):
+            items = list_obj.get("items")
+            if isinstance(items, list):
+                lines: list[str] = []
+                for it in items:
+                    if isinstance(it, dict):
+                        line = extract_rich_text(it.get("rich_text_nodes") or it.get("nodes")) or str(
+                            it.get("text") or ""
+                        )
+                        if line.strip():
+                            lines.append(f"• {line.strip()}")
+                if lines:
+                    return "\n".join(lines)
+
+        for key in ("heading", "blockquote", "code"):
+            sub = paragraph.get(key)
+            if isinstance(sub, dict):
+                sub_t = extract_rich_text(sub.get("rich_text_nodes") or sub.get("nodes")) or str(sub.get("text") or "")
+                if sub_t.strip():
+                    return sub_t.strip()
+            elif isinstance(sub, str) and sub.strip():
+                return sub.strip()
+        return ""
+
+    @staticmethod
+    def _dynamic_content(
+        modules: dict[str, dict[str, object]],
+    ) -> tuple[str, list[str], list[tuple[str, str]]]:
+        all_texts: list[str] = []
         images: list[str] = []
+        segments: list[tuple[str, str]] = []
+        pending_texts: list[str] = []
+
+        def flush_pending() -> None:
+            if pending_texts:
+                combined = "\n".join(pending_texts).strip()
+                pending_texts.clear()
+                if combined:
+                    segments.append(("text", combined))
+
         content = modules.get("module_content")
-        if content is None:
-            return "", images
-        paragraphs = content.get("paragraphs")
-        if not isinstance(paragraphs, list):
-            return "", images
-        for paragraph in paragraphs:
-            if not isinstance(paragraph, dict):
-                continue
-            text = BilibiliParser._dynamic_rich_text(paragraph.get("text"))
-            if text:
-                texts.append(text)
-            pic = paragraph.get("pic")
-            if not isinstance(pic, dict):
-                continue
-            for item in pic.get("pics") or []:
-                if not isinstance(item, dict):
-                    continue
-                url = item.get("url")
-                if isinstance(url, str) and is_allowed_media_host(url):
-                    images.append(normalize_url(url))
-        return "\n".join(texts), images
+        if content is not None:
+            paragraphs = content.get("paragraphs")
+            if isinstance(paragraphs, list):
+                for paragraph in paragraphs:
+                    if not isinstance(paragraph, dict):
+                        continue
+                    text = BilibiliParser._extract_paragraph_text(paragraph)
+                    if text:
+                        all_texts.append(text)
+                        pending_texts.append(text)
+                    pic = paragraph.get("pic")
+                    if isinstance(pic, dict):
+                        flush_pending()
+                        for item in pic.get("pics") or []:
+                            if not isinstance(item, dict):
+                                continue
+                            url = item.get("url")
+                            if isinstance(url, str) and is_allowed_media_host(url):
+                                normalized = normalize_url(url)
+                                if normalized not in images:
+                                    images.append(normalized)
+                                segments.append(("image", normalized))
+                flush_pending()
+
+        return "\n".join(all_texts), images, segments
 
     def _build_dynamic(self, item: dict[str, object], ident: str) -> BiliDynamicContent:
         modules = self._dynamic_modules(item.get("modules"))
@@ -914,11 +985,13 @@ class BilibiliParser(BaseParser):
         basic = item.get("basic")
         basic_title = str(basic.get("title") or "") if isinstance(basic, dict) else ""
         title = "" if basic_title.endswith("的动态 - 哔哩哔哩") else basic_title
+        article_type = str(basic.get("article_type") or "0") if isinstance(basic, dict) else "0"
+        is_article = article_type.isdigit() and int(article_type) > 0
         title_data = modules.get("module_title")
         if isinstance(title_data, dict):
             title = title or str(title_data.get("text") or "")
         dynamic_data = modules.get("module_dynamic")
-        text, images = self._dynamic_content(modules)
+        text, images, segments = self._dynamic_content(modules)
         cover: str | None = None
         url = f"https://t.bilibili.com/{ident}"
         top_data = modules.get("module_top")
@@ -938,7 +1011,10 @@ class BilibiliParser(BaseParser):
         if isinstance(dynamic_data, dict):
             desc = dynamic_data.get("desc")
             if isinstance(desc, dict):
-                text = text or self._dynamic_rich_text(desc)
+                desc_text = self._dynamic_rich_text(desc)
+                text = text or desc_text
+                if desc_text and not segments:
+                    segments.append(("text", desc_text))
             major = dynamic_data.get("major")
             if isinstance(major, dict):
                 draw = major.get("draw")
@@ -950,6 +1026,7 @@ class BilibiliParser(BaseParser):
                                 normalized = normalize_url(source)
                                 if normalized not in images:
                                     images.append(normalized)
+                                    segments.append(("image", normalized))
                 archive = major.get("archive")
                 if isinstance(archive, dict):
                     title = title or str(archive.get("title") or "")
@@ -965,7 +1042,10 @@ class BilibiliParser(BaseParser):
                     title = title or str(opus_data.get("title") or "")
                     summary = opus_data.get("summary")
                     if isinstance(summary, dict):
-                        text = text or self._dynamic_rich_text(summary)
+                        opus_summary = self._dynamic_rich_text(summary)
+                        text = text or opus_summary
+                        if opus_summary and not segments:
+                            segments.append(("text", opus_summary))
                     for pic in opus_data.get("pics", []):
                         if isinstance(pic, dict) and isinstance(pic.get("url"), str):
                             source = pic["url"]
@@ -973,10 +1053,19 @@ class BilibiliParser(BaseParser):
                                 normalized = normalize_url(source)
                                 if normalized not in images:
                                     images.append(normalized)
+                                    segments.append(("image", normalized))
                 article = major.get("article")
                 if isinstance(article, dict):
+                    is_article = True
                     title = title or str(article.get("title") or "")
-                    cover = cover or (normalize_url(str(article.get("cover") or "")) or None)
+                    raw_covers = article.get("covers")
+                    if isinstance(raw_covers, list) and raw_covers:
+                        first_cover = raw_covers[0]
+                        if isinstance(first_cover, str) and is_allowed_media_host(first_cover):
+                            cover = cover or normalize_url(first_cover)
+                    raw_cover = article.get("cover")
+                    if isinstance(raw_cover, str) and is_allowed_media_host(raw_cover):
+                        cover = cover or normalize_url(raw_cover)
                     jump_url = article.get("jump_url")
                     if isinstance(jump_url, str) and jump_url.startswith("http"):
                         url = jump_url
@@ -1021,6 +1110,8 @@ class BilibiliParser(BaseParser):
             cover=cover,
             metrics=metrics,
             orig=orig_dynamic,
+            segments=segments,
+            is_article=is_article,
         )
         return dynamic
 
@@ -1055,28 +1146,48 @@ class BilibiliParser(BaseParser):
             uid=dynamic.author.mid or None,
         )
         repost = self._build_repost_card(dynamic.orig) if dynamic.orig is not None else None
+        segments = list(dynamic.segments)
+        cover_url = dynamic.cover or next(iter(dynamic.images), None)
+        if dynamic.is_article and cover_url is not None:
+            if cover_url not in (value for kind, value in segments if kind == "image"):
+                segments.insert(0, ("image", cover_url))
+        has_mixed_segments = any(k == "image" for k, _ in segments) and any(k == "text" for k, _ in segments)
+        use_ordered_segments = bool(segments) and (has_mixed_segments or dynamic.is_article)
+        blocks = (
+            build_card_blocks(segments, limit=self.card_image_limit)
+            if use_ordered_segments
+            else build_image_blocks(dynamic.images, limit=self.card_image_limit)
+        )
         await self.send_info(
             card_type="common",
             title=dynamic.title or "哔哩哔哩动态",
             author=author,
-            text=dynamic.text or "",
-            cover_url=next(iter(dynamic.images), dynamic.cover),
-            blocks=build_image_blocks(dynamic.images, limit=self.card_image_limit),
+            text="" if has_mixed_segments else (dynamic.text or ""),
+            cover_url=cover_url,
+            blocks=blocks,
             url=dynamic.url,
             metrics=dynamic.metrics,
             repost=repost,
         )
-        contents: list[MediaContent] = []
-        if dynamic.images:
-            contents = self.create_image_contents(dynamic.images, headers=self.media_headers, proxy=self.proxy)
+        contents: list[ContentItem] = []
+        if use_ordered_segments:
+            for kind, value in segments:
+                if kind == "text":
+                    contents.append(self.create_text_content(value))
+                elif kind == "image":
+                    contents.extend(self.create_image_contents([value], headers=self.media_headers, proxy=self.proxy))
+        elif dynamic.images:
+            contents.extend(self.create_image_contents(dynamic.images, headers=self.media_headers, proxy=self.proxy))
         elif dynamic.cover:
-            contents = self.create_image_contents([dynamic.cover], headers=self.media_headers, proxy=self.proxy)
+            contents.extend(self.create_image_contents([dynamic.cover], headers=self.media_headers, proxy=self.proxy))
         elif dynamic.orig is not None:
             if dynamic.orig.images:
-                contents = self.create_image_contents(dynamic.orig.images, headers=self.media_headers, proxy=self.proxy)
+                contents.extend(
+                    self.create_image_contents(dynamic.orig.images, headers=self.media_headers, proxy=self.proxy)
+                )
             elif dynamic.orig.cover:
-                contents = self.create_image_contents(
-                    [dynamic.orig.cover], headers=self.media_headers, proxy=self.proxy
+                contents.extend(
+                    self.create_image_contents([dynamic.orig.cover], headers=self.media_headers, proxy=self.proxy)
                 )
         return self.result(contents)
 

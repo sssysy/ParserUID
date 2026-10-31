@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .helpers import (
+    MAX_RENDER_EDGE,
     MAX_SOURCE_EDGE,
     MAX_SOURCE_BYTES,
     IconName,
@@ -24,6 +25,7 @@ __all__ = [
     "IconName",
     "MAX_SOURCE_BYTES",
     "MAX_SOURCE_EDGE",
+    "MAX_RENDER_EDGE",
     "encode_png",
     "data_uri",
     "read_rgba",

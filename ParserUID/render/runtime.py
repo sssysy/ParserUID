@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import asyncio
 import inspect
@@ -11,6 +12,7 @@ from dataclasses import dataclass
 from collections.abc import Mapping, Callable, Awaitable
 
 import httpx
+from PIL import Image, ImageDraw
 from jinja2 import Template, Environment, FileSystemLoader, select_autoescape
 
 from gsuid_core.data_store import get_res_path
@@ -25,6 +27,8 @@ from .models import (
     CommentReply,
 )
 from .helpers import (
+    MAX_RENDER_EDGE,
+    encode_png,
     file_digest,
 )
 from ..utils.downloader import download_image
@@ -38,7 +42,15 @@ VIDEO_DPI: Final = 96.0
 PACK_DIR: Final = Path(__file__).resolve().parent / "pack"
 CACHE_DIR: Final = get_res_path("ParserUID") / "render_cache"
 RENDER_CACHE_MAX_AGE_SECONDS: Final = 7 * 24 * 60 * 60
-_RENDER_VERSION: Final = "13"
+PREVIEW_FADE_HEIGHT: Final = 320
+PREVIEW_DOT_RADIUS: Final = 8
+PREVIEW_DOT_GAP: Final = 22
+PREVIEW_DOT_BOTTOM: Final = 48
+PREVIEW_LIGHT_BACKGROUND: Final = (248, 250, 252)
+PREVIEW_DARK_BACKGROUND: Final = (8, 9, 11)
+PREVIEW_LIGHT_DOT: Final = (148, 163, 184)
+PREVIEW_DARK_DOT: Final = (226, 232, 240)
+_RENDER_VERSION: Final = "15"
 _SKIN_NAME_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 
 
@@ -288,17 +300,108 @@ def _render_prepared_html(html: str, *, video: bool) -> bytes:
     width = VIDEO_WIDTH if video else CARD_OUTPUT_WIDTH
     dpi = VIDEO_DPI if video else COMMON_DPI
     layout_width = VIDEO_WIDTH if video else CARD_WIDTH
-    return pytakumi.html_to_pic(
+    ratio = _dpr_from_dpi(dpi) or 1.0
+    max_css_height = MAX_RENDER_EDGE / ratio
+    max_height_css = f".pytakumi-root{{max-width:{layout_width}px;max-height:{max_css_height:g}px;overflow:hidden}}"
+    image_bytes = pytakumi.html_to_pic(
         html,
         width=width,
         height=None,
         format="png",
-        css=f".pytakumi-root{{max-width:{layout_width}px;}}",
+        css=max_height_css,
         renderer=renderer,
         device_pixel_ratio=_dpr_from_dpi(dpi),
         font_families=_font_families(None),
         lang="zh",
     )
+    if _png_height(image_bytes) < MAX_RENDER_EDGE:
+        return image_bytes
+    if not _html_exceeds_limit(
+        html,
+        renderer=renderer,
+        width=width,
+        layout_width=layout_width,
+        ratio=ratio,
+    ):
+        return image_bytes
+    return _apply_preview_cutoff(image_bytes, video=video)
+
+
+def _png_height(image_bytes: bytes) -> int:
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        return image.height
+
+
+def _html_exceeds_limit(
+    html: str,
+    *,
+    renderer: object,
+    width: int,
+    layout_width: int,
+    ratio: float,
+) -> bool:
+    """测量未被截断的布局高度，避免恰好撑满时误加省略提示。"""
+    import pytakumi
+    from pytakumi.api import extract_styles_and_body
+
+    if not isinstance(renderer, pytakumi.Renderer):
+        raise TypeError("渲染器类型不受支持")
+    styles, body = extract_styles_and_body(
+        html,
+        width,
+        None,
+        device_pixel_ratio=ratio,
+    )
+    measured = renderer.measure(
+        pytakumi.from_html(body),
+        width=layout_width,
+        stylesheets=styles,
+    )
+    height = measured.get("height")
+    if isinstance(height, bool) or not isinstance(height, int | float):
+        raise ValueError("渲染器未返回有效布局高度")
+    return float(height) * ratio > MAX_RENDER_EDGE + 0.5
+
+
+def _apply_preview_cutoff(image_bytes: bytes, *, video: bool) -> bytes:
+    """把超过渲染上限的卡片裁到 8192 像素，并在底部渐隐提示。"""
+    with Image.open(io.BytesIO(image_bytes)) as source:
+        image = source.convert("RGBA")
+    if image.height > MAX_RENDER_EDGE:
+        image = image.crop((0, 0, image.width, MAX_RENDER_EDGE))
+    if image.height < MAX_RENDER_EDGE:
+        return image_bytes
+
+    background = PREVIEW_DARK_BACKGROUND if video else PREVIEW_LIGHT_BACKGROUND
+    dot_color = PREVIEW_DARK_DOT if video else PREVIEW_LIGHT_DOT
+    fade_height = min(PREVIEW_FADE_HEIGHT, image.height)
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    fade_top = image.height - fade_height
+    for offset in range(fade_height):
+        progress = (offset + 1) / fade_height
+        alpha = round(255 * progress**1.8)
+        draw.line(
+            (0, fade_top + offset, image.width, fade_top + offset),
+            fill=(*background, alpha),
+        )
+    image = Image.alpha_composite(image, overlay)
+
+    draw = ImageDraw.Draw(image)
+    center_y = image.height - PREVIEW_DOT_BOTTOM
+    center_x = image.width // 2
+    for index in (-1, 0, 1):
+        x = center_x + index * PREVIEW_DOT_GAP
+        draw.ellipse(
+            (
+                x - PREVIEW_DOT_RADIUS,
+                center_y - PREVIEW_DOT_RADIUS,
+                x + PREVIEW_DOT_RADIUS,
+                center_y + PREVIEW_DOT_RADIUS,
+            ),
+            fill=(*dot_color, 255),
+        )
+    return encode_png(image)
 
 
 async def render_preview(
