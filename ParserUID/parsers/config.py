@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import json
 from typing import Literal, TypeAlias
 from pathlib import Path
@@ -13,6 +14,9 @@ from ..utils.exceptions import ParserConfigException
 
 ParserFieldType: TypeAlias = Literal["bool", "int", "float", "string", "text", "select", "list"]
 ParserFieldValue: TypeAlias = bool | int | float | str | list[str]
+AccessMode: TypeAlias = Literal["none", "white", "black"]
+
+_GROUP_ID_RE = re.compile(r"^\d+$")
 
 
 def _match_field_type(raw_type: str) -> ParserFieldType | None:
@@ -177,6 +181,9 @@ class ParserItemConfig:
     name: str
     enabled: bool
     values: dict[str, ParserFieldValue]
+    access_mode: AccessMode = "none"
+    whitelist: list[str] = field(default_factory=list)
+    blacklist: list[str] = field(default_factory=list)
 
     def get_bool(self, key: str, default: bool = False) -> bool:
         val = self.values.get(key)
@@ -200,6 +207,16 @@ class ParserItemConfig:
         val = self.values.get(key)
         return list(val) if isinstance(val, list) else (default or [])
 
+    def allows_group(self, group_id: str | None) -> bool:
+        """按当前名单模式判断群聊是否允许接收该解析器消息。"""
+        if self.access_mode == "none":
+            return True
+        if not group_id:
+            return False
+        if self.access_mode == "white":
+            return group_id in self.whitelist
+        return group_id not in self.blacklist
+
     def __getattr__(self, name: str) -> ParserFieldValue:
         if name in self.values:
             return self.values[name]
@@ -209,6 +226,27 @@ class ParserItemConfig:
 def get_user_config_path(name: str) -> Path:
     """返回解析器用户配置文件的存储路径。"""
     return get_res_path("ParserUID") / "parser_config" / f"{name}.json"
+
+
+def normalize_group_ids(raw: object) -> list[str]:
+    """校验并去重群号列表，忽略非字符串和非数字项。"""
+    if not isinstance(raw, list):
+        return []
+    result: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        group_id = item.strip()
+        if _GROUP_ID_RE.fullmatch(group_id) and group_id not in result:
+            result.append(group_id)
+    return result
+
+
+def normalize_access_mode(raw: object) -> AccessMode:
+    """收窄持久化的名单模式；未知值回落到不过滤。"""
+    if raw == "white" or raw == "black":
+        return raw
+    return "none"
 
 
 def load_parser_user_config(manifest: ParserManifest) -> ParserItemConfig:
@@ -252,10 +290,17 @@ def load_parser_user_config(manifest: ParserManifest) -> ParserItemConfig:
         else:
             merged_values[field_name] = field_def.default
 
+    access_mode = normalize_access_mode(raw.get("access_mode", "none"))
+    whitelist = normalize_group_ids(raw.get("whitelist", []))
+    blacklist = normalize_group_ids(raw.get("blacklist", []))
+
     return ParserItemConfig(
         name=manifest.name,
         enabled=enabled,
         values=merged_values,
+        access_mode=access_mode,
+        whitelist=whitelist,
+        blacklist=blacklist,
     )
 
 
@@ -267,6 +312,9 @@ def save_parser_user_config(config: ParserItemConfig) -> None:
         "schema_version": 1,
         "enabled": config.enabled,
         "values": config.values,
+        "access_mode": config.access_mode,
+        "whitelist": normalize_group_ids(config.whitelist),
+        "blacklist": normalize_group_ids(config.blacklist),
     }
     content = json.dumps(payload, ensure_ascii=False, indent=2)
     config_path.write_text(content, encoding="utf-8")

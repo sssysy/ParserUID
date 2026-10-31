@@ -12,7 +12,12 @@ from collections.abc import Mapping, Callable, Sequence, Awaitable, Coroutine
 import httpx
 
 from .config import ParserItemConfig
-from ..config import proxy_url, card_image_limit
+from ..config import (
+    proxy_url,
+    card_image_limit,
+    parse_result_enabled,
+    render_preview_enabled,
+)
 from ..sender import ContentItem, send_proxy_context
 from ..utils.ffmpeg import merge_to_live_mp4
 from ..utils.models import (
@@ -145,6 +150,15 @@ class BaseParser:
                         results.append((keyword, pattern))
         return results
 
+    @classmethod
+    async def active_instance(cls) -> BaseParser | None:
+        """返回注册表中该平台的实例，未启用时返回 None。"""
+        from ..parser import get_runtime
+
+        runtime = await get_runtime()
+        parser = runtime.registry.get(cls.platform.name)
+        return parser if isinstance(parser, cls) else None
+
     async def get_client(self, proxy: str | None = None) -> httpx.AsyncClient:
         """获取或创建该解析器持有的标准异步 HTTP 会话。"""
         effective_proxy = self.proxy if proxy is None else proxy
@@ -248,6 +262,8 @@ class BaseParser:
         video_quality: str | None = None,
     ) -> None:
         """统一入口：构造预览卡片并通过调度上下文的 sink 发送。"""
+        if not render_preview_enabled():
+            return
         sink, proxy = _CURRENT_DESC_SINK.get()
         if sink is None:
             return
@@ -282,6 +298,8 @@ class BaseParser:
 
     def result(self, contents: Sequence[ContentItem]) -> list[ContentItem]:
         """按顺序返回最终内容队列。"""
+        if not parse_result_enabled():
+            return []
         return list(contents)
 
     def create_text_content(self, text: str) -> TextContent:

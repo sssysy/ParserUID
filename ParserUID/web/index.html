@@ -36,14 +36,14 @@
           </button>
           <button
             class="primary-tab"
-            id="tab-network"
+            id="tab-access"
             type="button"
             role="tab"
             aria-selected="false"
-            aria-controls="panel-network"
-            data-tab="network"
+            aria-controls="panel-access"
+            data-tab="access"
           >
-            <span>网络</span>
+            <span>黑白名单</span>
           </button>
         </div>
 
@@ -167,40 +167,45 @@
 
       <section
         class="tab-panel"
-        id="panel-network"
+        id="panel-access"
         role="tabpanel"
-        aria-labelledby="tab-network"
+        aria-labelledby="tab-access"
         hidden
       >
-        <div class="skin-panel network-panel">
-          <header class="content-header">
-            <h1>网络</h1>
-            <p>全局代理只对已启用“使用代理”的解析器生效。</p>
-          </header>
+        <div class="list-detail" id="access-layout">
+          <aside class="list-pane" aria-label="解析器名单列表">
+            <header class="pane-header">
+              <h1>黑白名单</h1>
+            </header>
 
-          <section class="skin-section network-section">
-            <h2 class="section-title">代理地址</h2>
-            <div class="network-form">
-              <div class="filled-field">
-                <label for="proxy-url">HTTP(S) 代理</label>
-                <input
-                  id="proxy-url"
-                  type="text"
-                  inputmode="url"
-                  autocomplete="off"
-                  placeholder="http://127.0.0.1:7890"
+            <label class="search-field" for="access-search">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M9.5 3a6.5 6.5 0 1 0 4.06 11.58L19.5 20.5 21 19l-5.92-5.94A6.5 6.5 0 0 0 9.5 3Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"
                 />
-              </div>
-              <p class="field-support" id="proxy-message">
-                留空表示直连。保存后新任务立即使用新代理。
-              </p>
-              <div class="network-actions">
-                <button class="filled-button" id="save-proxy" type="button">
-                  保存代理
-                </button>
-              </div>
-            </div>
-          </section>
+              </svg>
+              <input
+                id="access-search"
+                type="search"
+                placeholder="搜索解析器"
+                autocomplete="off"
+              />
+            </label>
+
+            <div
+              class="parser-list"
+              id="access-parser-list"
+              role="listbox"
+              aria-label="选择解析器"
+            ></div>
+          </aside>
+
+          <section
+            class="detail-pane"
+            id="access-detail"
+            aria-live="polite"
+          ></section>
         </div>
       </section>
     </main>

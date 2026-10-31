@@ -274,7 +274,7 @@ GsCore 的 `Bot.send()` 不向插件返回适配器发送结果。只有显式�
 
 页面配置规则：
 
-- 解析器启停和皮肤选择只放网页配置页；代理地址、任务超时、文件大小和时长上限、合并转发阈值、防抖秒数放普通 `config.json`。
+- 解析器启停和皮肤选择只放网页配置页；OneBotUID 贴表情开关、代理地址、任务超时、文件大小和时长上限、合并转发阈值、防抖秒数放普通 `config.json`。
 - 页面只读取解析器 `config.json` 声明的字段并动态渲染，不硬编码平台字段。
 - 敏感字段不回显原值；页面留空表示保持原值，明确清除时走单独接口。
 - 页面 API 必须登录鉴权，路径统一在 `PluginAPI()` 的 `/api/<plugin_id>` 前缀下。
@@ -285,9 +285,10 @@ GsCore 的 `Bot.send()` 不向插件返回适配器发送结果。只有显式�
 
 插件全局配置使用 GsCore 的 `StringConfig` 和 `Gs*Config`，配置文件放 `data/ParserUID/config.json`。
 
-全局配置只保留以下 8 项：
+全局配置包含以下项目：
 
 - 解析引用内容。
+- 对 OneBotUID 触发解析时启用贴表情；仅在通过 OneBotUID 连接至 GsCore 时生效。
 - 代理地址。
 - 任务超时时间。
 - 文件大小上限。
@@ -461,7 +462,7 @@ python -m basedpyright ParserUID
 - [ ] 下载经过 `utils/downloader.py`，底层复用框架 `download_file.download`，有大小、时长、超时和有限重试限制。
 - [ ] 用户配置、Cookie、缓存和临时文件只写 `data/ParserUID/`。
 - [ ] 内置解析器只在源码包，第三方解析器只在 `data/ParserUID/thirdparty/parsers/`，第三方皮肤只在 `data/ParserUID/thirdparty/renderskinpacks/`。
-- [ ] 网页配置页可控制解析器启停和选择皮肤包；普通全局配置只包含第 7 节列出的 8 项。
+- [ ] 网页配置页可控制解析器启停和选择皮肤包；普通全局配置项与第 7 节一致。
 - [ ] 下载失败提示固定开启，卡片正文图片上限固定为 9。
 - [ ] 未添加任何 AI 入口，除非用户明确要求接入 AI。
 - [ ] 没有 `Any`、`cast`、`type: ignore`，没有用 `getattr` 或 `dict.get` 兜底。

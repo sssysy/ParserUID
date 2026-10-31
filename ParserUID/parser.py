@@ -20,7 +20,10 @@ from gsuid_core.server import on_core_start, on_core_shutdown
 
 from .config import (
     parser_config,
+    onebot_emoji_reaction_enabled,
 )
+from .utils.onebot import react_to_trigger_message
+from .parsers.config import ParserItemConfig
 from .utils.exceptions import ParseException, format_user_error, sanitize_error_text
 
 
@@ -34,6 +37,8 @@ class ContentItem(Protocol):
 
 class ParserEntry(Protocol):
     """注册表返回的解析器实例。"""
+
+    config: ParserItemConfig
 
     async def parse(
         self,
@@ -60,6 +65,8 @@ class ParserRegistry(Protocol):
     """解析器注册表接口。"""
 
     def match(self, url: str) -> ParserMatch | None: ...
+
+    def get(self, name: str) -> ParserEntry | None: ...
 
     async def close(self) -> None: ...
 
@@ -294,6 +301,12 @@ class ParserRuntime:
             return False
 
         normalized_source = normalize_url(source) if _is_http_url(source) else " ".join(source.split())
+        if not matched.parser.config.allows_group(ev.group_id):
+            logger.info(
+                f"[Parser·编排] 群聊被名单拦截 | parser={matched.keyword} | mode={matched.parser.config.access_mode}"
+            )
+            return False
+
         now = self._clock()
         if not self._message_claims.claim(build_dedup_key(ev, normalized_source), now):
             return False
@@ -305,6 +318,15 @@ class ParserRuntime:
 
         host = urlsplit(normalized_source).hostname if _is_http_url(normalized_source) else "text"
         logger.info(f"[Parser·解析] 链接命中，开始解析 | parser={matched.keyword} | host={host or 'unknown'}")
+        if onebot_emoji_reaction_enabled():
+            reaction_task = asyncio.create_task(
+                react_to_trigger_message(ev),
+                name=f"ParserUID:OneBotUID-Reaction:{matched.keyword}",
+            )
+            self._tasks.add(reaction_task)
+            reaction_task.add_done_callback(self._on_task_done)
+            bot.bot._add_bg_task(reaction_task)
+
         task = asyncio.create_task(
             self._run_selected(bot, ev, matched),
             name=f"ParserUID:{matched.keyword}",
@@ -446,7 +468,7 @@ async def close_runtime() -> None:
 sv = SV("ParserUID 自动解析", pm=6, area="ALL")
 
 
-@sv.on_message(block=False)
+@sv.on_message(block=False, prefix=False)
 async def on_parser_message(bot: Bot, ev: Event) -> None:
     """自动解析消息中的首个受支持链接。"""
     runtime = await get_runtime()

@@ -67,6 +67,10 @@ class RegistrySnapshot:
                     )
         return None
 
+    def get(self, name: str) -> BaseParser | None:
+        """按平台名返回已启用的解析器实例。"""
+        return self._parsers.get(name)
+
     async def close(self) -> None:
         tasks = [parser.close() for parser in self._parsers.values()]
         if tasks:
@@ -135,6 +139,33 @@ def _import_parser_class(
     return parser_cls
 
 
+def _import_parser_commands(dir_path: Path, module_name: str) -> bool:
+    """加载解析器包内可选命令模块，允许其通过 SV 注册命令。"""
+    command_file = dir_path / "init.py"
+    if not command_file.is_file():
+        return True
+
+    try:
+        spec = importlib.util.spec_from_file_location(
+            f"{module_name}.init",
+            command_file,
+        )
+        if spec is None or spec.loader is None:
+            logger.warning(f"[Parser·注册] 命令模块无有效加载器 | name={dir_path.name}")
+            return False
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[f"{module_name}.init"] = module
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        logger.warning(
+            f"[Parser·注册] 命令模块导入失败 | name={dir_path.name} | error={type(exc).__name__}",
+        )
+        return False
+
+    logger.info(f"[Parser·注册] 命令模块加载完成 | name={dir_path.name}")
+    return True
+
+
 async def load_registry() -> RegistrySnapshot:
     """扫描内置与第三方目录，校验一致性与防冲突，生成已启用解析器的匹配快照。"""
     builtin_dir = get_builtin_parsers_dir()
@@ -189,6 +220,9 @@ async def load_registry() -> RegistrySnapshot:
                     has_conflict = True
                     break
             if has_conflict:
+                continue
+
+            if not _import_parser_commands(child, f"{module_prefix}.{child.name}"):
                 continue
 
             discovered_names.add(child.name)

@@ -136,7 +136,9 @@ class BilibiliParser(BaseParser):
         )
         self._credential_file = get_res_path("ParserUID") / "cookies" / "bilibili_credential.json"
         self._credential: BiliCredential | None = load_credential(self._credential_file)
+        self._set_cookies()
         self._credential_lock = asyncio.Lock()
+        self._login_lock = asyncio.Lock()
         self._user_cache: dict[int | str, BiliUserCard | None] = {}
         self._qr_login: QrLogin | None = None
 
@@ -173,6 +175,7 @@ class BilibiliParser(BaseParser):
     ) -> dict[str, object]:
         retries = 2
         last_error: Exception | None = None
+        await self._ensure_credential()
         client = await self.get_client()
         for attempt in range(retries + 1):
             try:
@@ -743,7 +746,8 @@ class BilibiliParser(BaseParser):
                     self._credential = load_credential(self._credential_file)
                     if self._credential is not None:
                         self._set_cookies()
-                return self._credential
+                if self._credential is None:
+                    return None
 
             if not self._credential.needs_refresh:
                 return self._credential
@@ -757,12 +761,12 @@ class BilibiliParser(BaseParser):
                     proxy=self.proxy,
                 )
             except BiliAuthError as exc:
-                logger.warning(f"[哔哩哔哩] 凭证续期失败: {exc}")
+                logger.warning(f"[Parser·哔哩哔哩] 凭证续期失败: {exc}")
                 return self._credential
             self._credential = refreshed
-            save_credential(self._credential_file, refreshed)
+            await asyncio.to_thread(save_credential, self._credential_file, refreshed)
             self._set_cookies()
-            logger.info("[哔哩哔哩] 凭证续期成功")
+            logger.info("[Parser·哔哩哔哩] 凭证续期成功")
             return self._credential
 
     async def login_with_qrcode(self) -> bytes:
@@ -770,14 +774,21 @@ class BilibiliParser(BaseParser):
         return await self._qr_login.generate_qrcode()
 
     async def complete_qr_login(self) -> PollResult:
-        if getattr(self, "_qr_login", None) is None:
+        if self._qr_login is None:
             raise ParseException("请先生成哔哩哔哩登录二维码")
-        result = await poll_login(self._qr_login)
+        async with self._login_lock:
+            result = await poll_login(self._qr_login)
         if result.credential is not None:
-            self._credential = result.credential
-            save_credential(self._credential_file, result.credential)
-            self._set_cookies()
+            await self.apply_credential(result.credential)
         return result
+
+    async def apply_credential(self, credential: BiliCredential) -> None:
+        """更新内存 Cookie 并把登录凭证原子写入数据目录。"""
+        async with self._credential_lock:
+            self._credential = credential
+            self._set_cookies()
+            await asyncio.to_thread(save_credential, self._credential_file, credential)
+        logger.info(f"[Parser·哔哩哔哩] 登录凭证已保存 | mid={credential.mid}")
 
     async def _fetch_hot_danmaku(self, cid: int) -> list[str]:
         """获取高频弹幕；失败只影响卡片附加信息，不阻断解析。"""

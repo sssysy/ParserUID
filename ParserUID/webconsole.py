@@ -26,9 +26,12 @@ from .config import (
     default_skin_pack,
 )
 from .parsers.config import (
+    AccessMode,
     ParserManifest,
     ParserFieldValue,
     ParserItemConfig,
+    normalize_group_ids,
+    normalize_access_mode,
     load_parser_user_config,
     save_parser_user_config,
 )
@@ -77,6 +80,9 @@ class ParserItemView(TypedDict):
     name: str
     display_name: str
     enabled: bool
+    access_mode: AccessMode
+    whitelist: list[str]
+    blacklist: list[str]
     fields: list[ParserFieldView]
     values: dict[str, ParserFieldValue]
 
@@ -105,6 +111,17 @@ class ParserUpdatePayload(BaseModel):
 
 class SaveParsersRequest(BaseModel):
     parsers: list[ParserUpdatePayload]
+
+
+class AccessListUpdatePayload(BaseModel):
+    name: str
+    access_mode: AccessMode
+    whitelist: list[str]
+    blacklist: list[str]
+
+
+class SaveAccessListsRequest(BaseModel):
+    parsers: list[AccessListUpdatePayload]
 
 
 class SaveSkinRequest(BaseModel):
@@ -280,6 +297,9 @@ async def list_parsers() -> object:
                 "name": manifest.name,
                 "display_name": manifest.display_name,
                 "enabled": user_config.enabled,
+                "access_mode": user_config.access_mode,
+                "whitelist": user_config.whitelist,
+                "blacklist": user_config.blacklist,
                 "fields": fields_view,
                 "values": public_values,
             }
@@ -318,12 +338,43 @@ async def save_parsers(req: SaveParsersRequest) -> object:
             else:
                 cleaned_values[f_name] = f_def.default
 
+        existing = await asyncio.to_thread(load_parser_user_config, manifest)
         item_config = ParserItemConfig(
             name=item.name,
             enabled=item.enabled,
             values=cleaned_values,
+            access_mode=existing.access_mode,
+            whitelist=existing.whitelist,
+            blacklist=existing.blacklist,
         )
         await asyncio.to_thread(save_parser_user_config, item_config)
+
+    await _reload_runtime_safely()
+    return api_ok({"saved": True, "count": len(req.parsers)})
+
+
+@api.post("/parser-settings/access-lists")
+async def save_access_lists(req: SaveAccessListsRequest) -> object:
+    """保存每个解析器的群聊名单并刷新运行时快照。"""
+    manifests = await asyncio.to_thread(_scan_all_manifests)
+
+    for item in req.parsers:
+        manifest = manifests.get(item.name)
+        if manifest is None:
+            return api_fail(f"未找到解析器: {item.name}", status=404)
+        existing = await asyncio.to_thread(load_parser_user_config, manifest)
+        whitelist = normalize_group_ids(item.whitelist)
+        blacklist = normalize_group_ids(item.blacklist)
+        mode = normalize_access_mode(item.access_mode)
+        updated = ParserItemConfig(
+            name=item.name,
+            enabled=existing.enabled,
+            values=existing.values,
+            access_mode=mode,
+            whitelist=whitelist,
+            blacklist=blacklist,
+        )
+        await asyncio.to_thread(save_parser_user_config, updated)
 
     await _reload_runtime_safely()
     return api_ok({"saved": True, "count": len(req.parsers)})

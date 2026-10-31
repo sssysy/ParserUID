@@ -10,7 +10,7 @@ from enum import Enum
 from hashlib import md5
 from pathlib import Path
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import qrcode
 
@@ -56,10 +56,11 @@ class BiliCredential:
 
     @property
     def cookie_header(self) -> str:
+        sessdata = self.sessdata if "%" in self.sessdata else quote(self.sessdata, safe="")
         return "; ".join(
             f"{name}={value}"
             for name, value in (
-                ("SESSDATA", self.sessdata),
+                ("SESSDATA", sessdata),
                 ("bili_jct", self.bili_jct),
                 ("DedeUserID", self.dedeuserid),
             )
@@ -68,7 +69,7 @@ class BiliCredential:
 
     @property
     def needs_refresh(self) -> bool:
-        return bool(self.expires_at and time.time() >= self.expires_at)
+        return self.expires_at > 0 and time.time() >= self.expires_at
 
     @property
     def can_refresh(self) -> bool:
@@ -137,12 +138,16 @@ class QrLogin:
         import aiohttp
 
         params = _signed({"local_id": "0", "ts": int(time.time())})
-        async with aiohttp.ClientSession(
-            headers=QR_REQUEST_HEADERS,
-            proxy=self.proxy,
-        ) as session:
-            async with session.post(TV_AUTH_CODE_URL, params=params) as response:
-                body = await response.read()
+        try:
+            async with aiohttp.ClientSession(
+                headers=QR_REQUEST_HEADERS,
+                proxy=self.proxy,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as session:
+                async with session.post(TV_AUTH_CODE_URL, params=params) as response:
+                    body = await response.read()
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise BiliAuthError("无法连接 B 站登录接口") from exc
         if response.status != 200:
             raise BiliAuthError(f"B 站登录接口返回 HTTP {response.status}")
         try:
@@ -175,12 +180,16 @@ class QrLogin:
                 "ts": int(time.time()),
             }
         )
-        async with aiohttp.ClientSession(
-            headers=QR_REQUEST_HEADERS,
-            proxy=self.proxy,
-        ) as session:
-            async with session.post(TV_POLL_URL, params=params) as response:
-                body = await response.read()
+        try:
+            async with aiohttp.ClientSession(
+                headers=QR_REQUEST_HEADERS,
+                proxy=self.proxy,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as session:
+                async with session.post(TV_POLL_URL, params=params) as response:
+                    body = await response.read()
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise BiliAuthError("无法获取 B 站扫码登录状态") from exc
         if response.status != 200:
             raise BiliAuthError(f"B 站登录状态接口返回 HTTP {response.status}")
         try:
@@ -216,12 +225,16 @@ async def refresh_credential(
             "ts": int(time.time()),
         }
     )
-    async with aiohttp.ClientSession(
-        headers=QR_REQUEST_HEADERS,
-        proxy=proxy,
-    ) as session:
-        async with session.post(REFRESH_TOKEN_URL, params=params) as response:
-            body = await response.read()
+    try:
+        async with aiohttp.ClientSession(
+            headers=QR_REQUEST_HEADERS,
+            proxy=proxy,
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as session:
+            async with session.post(REFRESH_TOKEN_URL, params=params) as response:
+                body = await response.read()
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        raise BiliAuthError("无法连接 B 站凭证续期接口") from exc
     if response.status != 200:
         raise BiliAuthError(f"B 站凭证续期接口返回 HTTP {response.status}")
     try:
@@ -248,11 +261,15 @@ def load_credential(path: Path) -> BiliCredential | None:
 
 def save_credential(path: Path, credential: BiliCredential) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
+    temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
     temporary.write_text(
         json.dumps(credential.to_dict(), ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    try:
+        temporary.chmod(0o600)
+    except OSError:
+        pass
     temporary.replace(path)
 
 
@@ -266,7 +283,7 @@ async def poll_login(
     login: QrLogin,
     *,
     interval: float = 2,
-    attempts: int = 60,
+    attempts: int = 30,
 ) -> PollResult:
     """轮询登录状态；每条状态更新和最终凭证分开返回。"""
     messages: list[str] = []

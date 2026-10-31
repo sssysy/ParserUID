@@ -29,6 +29,21 @@ CONFIG_DEFAULT: dict[str, GSC] = {
         desc="开启后，当前消息没有链接时扫描被引用消息的正文和分享卡片。",
         data=True,
     ),
+    "onebot_emoji_reaction": GsBoolConfig(
+        title="对 OneBotUID 触发解析时启用贴表情",
+        desc="仅在通过 OneBotUID 连接至 GsCore 时生效；解析命中后对触发消息贴睁眼表情（289），未安装 OneBotUID 时自动跳过。",
+        data=False,
+    ),
+    "send_render_preview": GsBoolConfig(
+        title="发送渲染预览卡片",
+        desc="关闭后，解析器调用 send_info() 时不再渲染和发送预览卡片。",
+        data=True,
+    ),
+    "send_parse_result": GsBoolConfig(
+        title="发送解析结果",
+        desc="关闭后，解析器调用 result() 时丢弃解析结果，不再发送媒体内容。",
+        data=True,
+    ),
     "proxy_url": GsStrConfig(
         title="代理地址",
         desc="供启用“使用代理”的解析器共用，例如 http://127.0.0.1:7890；留空表示直连。",
@@ -173,6 +188,21 @@ def default_skin_pack() -> str:
 def card_image_limit() -> int:
     """返回固定的预览卡片正文图片数量上限。"""
     return MAX_CARD_IMAGE_BLOCKS
+
+
+def render_preview_enabled() -> bool:
+    """返回是否渲染并发送解析器提供的预览卡片。"""
+    return bool(parser_config.get_config("send_render_preview").data)
+
+
+def parse_result_enabled() -> bool:
+    """返回是否发送解析器返回的结果内容。"""
+    return bool(parser_config.get_config("send_parse_result").data)
+
+
+def onebot_emoji_reaction_enabled() -> bool:
+    """返回是否对 OneBotUID 触发的解析消息贴表情。"""
+    return bool(parser_config.get_config("onebot_emoji_reaction").data)
 
 
 def max_file_size_bytes() -> int:

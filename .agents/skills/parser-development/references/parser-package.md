@@ -7,6 +7,7 @@
 ```text
 ParserUID/parsers/example/
 ├── __init__.py
+├── init.py
 ├── config.json
 ├── parser.py
 └── models.py
@@ -92,6 +93,145 @@ class ExampleParser(BaseParser):
 - 不在包入口发起网络请求、写文件或加载凭据。
 - 不在包入口启动浏览器、调度器或长生命周期任务。
 - 不逐个导入包内所有模块作为注册手段。
+
+## 解析器包内命令（`init.py`）
+
+解析器需要自己的登录、刷新、切换账号或维护操作时，在包目录内创建可选的 `init.py`。
+注册中心在解析器 manifest、`PARSER` 身份和链接关键词都通过校验后执行该文件；
+解析器未启用也会注册命令，但不会实例化解析器。
+
+最小结构：
+
+```text
+ParserUID/parsers/example/
+├── __init__.py
+├── init.py
+├── config.json
+└── parser.py
+```
+
+内置解析器的 `init.py` 必须使用相对导入：
+
+```python
+from __future__ import annotations
+
+import asyncio
+
+from gsuid_core.sv import SV
+from gsuid_core.bot import Bot
+from gsuid_core.models import Event
+
+from .parser import ExampleParser
+from .auth import ExampleAuthError
+from ...utils.exceptions import sanitize_error_text
+
+sv = SV("示例平台解析器命令", pm=0, area="ALL")
+_login_lock = asyncio.Lock()
+
+
+@sv.on_fullmatch("example_login", block=True)
+async def login(bot: Bot, ev: Event) -> None:
+    """登录示例账号。"""
+    del ev
+    async with _login_lock:
+        parser = await ExampleParser.active_instance()
+        owns_parser = parser is None
+        if parser is None:
+            parser = ExampleParser()
+        try:
+            await bot.send("请完成登录")
+            await parser.login_with_qrcode()
+        except (ExampleAuthError, OSError) as exc:
+            detail = sanitize_error_text(str(exc), hide_local_paths=True)
+            await bot.send(f"登录失败：{detail}")
+        finally:
+            if owns_parser:
+                await parser.close()
+```
+
+### 发现与导入
+
+- 文件名固定为小写 `init.py`。不是 GsCore 插件入口 `__init__.py`，也不使用
+  `__full__.py`、`__nest__.py`。
+- 注册器只从解析器包的直接目录读取 `init.py`，不接受用户提供的任意文件路径。
+- 第三方解析器允许按加载器提供的模块命名空间使用兼容导入方式；内置解析器必须遵守
+  相对导入红线。
+- `init.py` 导入失败时拒绝该解析器的命令模块并记录错误；该失败不应让其他解析器
+  无法注册。导入成功只代表触发器已注册，不代表命令一定可用。
+- 不要从 `parsers/__init__.py`、`parsers/base.py`、`parser.py` 或插件全局配置中
+  手工导入 `init.py`。
+
+### 触发器与命令约定
+
+- 管理类命令优先使用 `on_fullmatch`；需要参数时用 `on_command` 或 `on_prefix`。
+- 命令关键词应带平台语义，避免和普通聊天、其他插件命令冲突；平台解析器内部发现
+  机制不负责全局命令名冲突仲裁，注册前必须搜索现有命令。
+- 显式声明权限：登录、Cookie、Token、账号、凭据清理等命令使用 `pm=0`；确需群管理
+  操作时按 GsCore 的 `pm` 语义设计，不得默认 `pm=6` 放开给普通用户。
+- 显式声明 `area`（`GROUP` / `DIRECT` / `ALL`）和必要的 `block`。不能依赖其他插件的
+  触发器阻断本命令。
+- 命令处理函数签名固定为 `async def handler(bot: Bot, ev: Event) -> None`。使用 `Bot`
+  和 `Event`，不直接依赖 `_Bot`。
+- 命令的直接反馈使用 `bot.send()`；这是命令模块允许直接发送的边界，不得把
+  `bot.send()` 带进 `parser.py` 的自动解析处理函数。
+- 自动链接解析仍只走 `parser.py` 中的 `@handle` 和唯一 `on_parser_message` 入口。
+  不得为同一个链接再注册命令触发器，也不得让命令入口接管普通聊天。
+
+### 取得解析器实例
+
+需要实例的配置、会话或下载器时，优先复用注册表中的启用实例：
+
+```python
+parser = await ExampleParser.active_instance()
+if parser is None:
+    parser = ExampleParser()
+    owns_parser = True
+else:
+    owns_parser = False
+```
+
+- `active_instance()` 返回注册表中的实例；解析器停用时返回 `None`。
+- 临时实例只用于命令自身的操作，不得把它注册进快照，也不得修改其他解析器的状态。
+- 临时实例创建的 HTTP 会话、下载器、临时文件和后台任务必须在 `finally` 中通过
+  `await parser.close()` 释放。
+- 复用实例时不要关闭注册表持有的会话。命令结束后只释放自己创建的资源。
+- 解析器构造阶段不得发起网络请求；所有 I/O 放在命令处理或解析处理函数中。
+
+### 登录、凭证与续期
+
+- 命令可以完成登录、刷新和账号操作，但必须把用户配置写到
+  `data/ParserUID/parser_config/<name>.json`，把 Cookie、Token 或扫码凭证写到
+  `data/ParserUID/cookies/`。
+- 凭证文件使用原子替换保存，并尽量限制为仅当前用户可读写；不得写源码目录或提交到
+  仓库。
+- 用户配置必须通过解析器配置模型读写，不能直接改全局 `config.json`，也不能在命令
+  与解析器之间维护两份启用状态。
+- 登录成功后要同时更新当前解析器实例的内存 Cookie 和持久化凭证；否则网页配置页、
+  自动解析和续期会读到不同状态。
+- 凭证续期使用已保存的 refresh token，串行化刷新操作，避免多个请求重复消耗同一个
+  refresh token。续期失败只记录安全上下文，不把 Token 或完整响应返回给用户。
+- 扫码轮询必须有总时长、二维码过期状态和用户确认提示；过期后要求重新生成，不得
+  无限轮询。
+
+### 命令中的异步与生命周期
+
+- 命令内网络 I/O、扫码轮询、刷新和文件读写都必须异步，或通过
+  `asyncio.to_thread()` 执行。
+- 需要等待用户扫码时可以使用 `asyncio.Lock` 串行化同一账号的登录流程；不要创建
+  无引用、无回收的后台轮询任务。
+- 长时间任务必须受 Core 插件关闭路径管理，或在 `finally` 中取消并等待。
+- 命令失败时向用户发送简短原因；日志记录解析器名、阶段和异常类型，不记录凭据、
+  签名、完整响应体或带敏感查询参数的 URL。
+- 不把命令测试数据、抓包凭证和本地截图写成生产默认值。
+
+### 命令验证
+
+至少离线验证：
+
+1. 临时解析器目录中的 `init.py` 能被注册器执行，命令触发器出现在对应 `SV` 中。
+2. 解析器停用时命令仍可触发，且不会意外创建或泄漏解析器实例。
+3. 命令失败时只发送安全提示，成功时只写数据目录中的凭证和用户配置。
+4. 登录、刷新和关闭路径都有明确的资源回收。
 
 ## `@handle` 规则
 

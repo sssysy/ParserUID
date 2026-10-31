@@ -45,14 +45,15 @@
     saveStatus: document.getElementById("save-status"),
     saveAll: document.getElementById("save-all"),
     discardAll: document.getElementById("discard-all"),
-    proxyUrl: document.getElementById("proxy-url"),
-    proxyMessage: document.getElementById("proxy-message"),
-    saveProxy: document.getElementById("save-proxy"),
+    accessLayout: document.getElementById("access-layout"),
+    accessSearch: document.getElementById("access-search"),
+    accessParserList: document.getElementById("access-parser-list"),
+    accessDetail: document.getElementById("access-detail"),
     tabs: [...document.querySelectorAll("[data-tab]")],
     panels: {
       parsers: document.getElementById("panel-parsers"),
       skins: document.getElementById("panel-skins"),
-      network: document.getElementById("panel-network"),
+      access: document.getElementById("panel-access"),
     },
   };
 
@@ -77,6 +78,10 @@
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path fill="currentColor" d="m7 10 5 5 5-5H7Z"/>
       </svg>`,
+    close: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="m6.7 5.3 5.3 5.29 5.3-5.3 1.4 1.42-5.29 5.3 5.3 5.29-1.42 1.42-5.3-5.3-5.29 5.3-1.42-1.42 5.3-5.3-5.3-5.29 1.42-1.42Z"/>
+      </svg>`,
   };
 
   const state = {
@@ -87,8 +92,11 @@
     loadError: "",
     saving: false,
     detailOpen: false,
+    accessDetailOpen: false,
+    accessQuery: "",
     listMotionKey: "",
     detailMotionKey: "",
+    accessMotionKey: "",
   };
 
   let snackbarTimer = 0;
@@ -165,6 +173,19 @@
     );
   }
 
+  function isAccessDirty(parser) {
+    return (
+      parser.access_mode !== parser.base_access_mode ||
+      valueKey(parser.whitelist) !== valueKey(parser.base_whitelist) ||
+      valueKey(parser.blacklist) !== valueKey(parser.base_blacklist)
+    );
+  }
+
+  function normalizeGroupIds(values) {
+    if (!Array.isArray(values)) return [];
+    return [...new Set(values.filter((value) => typeof value === "string" && /^\d+$/.test(value)))];
+  }
+
   function currentParser() {
     return state.parsers.find((parser) => parser.name === state.selectedName);
   }
@@ -197,14 +218,21 @@
       .filter(({ draft }) => isDraftDirty(draft));
   }
 
+  function dirtyAccessEntries() {
+    return state.parsers.filter(isAccessDirty);
+  }
+
   function refreshGlobalSaveState() {
     const dirty = dirtyEntries();
-    const count = dirty.length;
+    const dirtyAccess = dirtyAccessEntries();
+    const count = dirty.length + dirtyAccess.length;
     refs.saveAll.disabled = !count || state.saving;
     refs.saveAll.textContent = state.saving ? "保存中" : "保存";
     refs.discardAll.hidden = !count || state.saving;
     refs.saveStatus.hidden = !count;
-    refs.saveStatus.textContent = count ? `${count} 个平台未保存` : "";
+    refs.saveStatus.textContent = count
+      ? `${count} 项设置未保存`
+      : "";
     refs.saveStatus.classList.toggle("is-dirty", Boolean(count));
     for (const parser of state.parsers) {
       getDraft(parser);
@@ -293,12 +321,8 @@
   }
 
   function updateActiveRail() {
-    for (const item of refs.parserList.querySelectorAll(".parser-item")) {
-      item.setAttribute(
-        "aria-selected",
-        item.dataset.name === state.selectedName ? "true" : "false",
-      );
-    }
+    updateParserActiveRail();
+    updateAccessActiveRail();
   }
 
   function requestSelectParser(name) {
@@ -311,6 +335,7 @@
     refs.layout.classList.add("is-detail-open");
     updateActiveRail();
     renderDetail();
+    renderAccessDetail();
     if (window.matchMedia("(max-width: 840px)").matches) {
       refs.parserDetail.scrollTop = 0;
     }
@@ -319,6 +344,273 @@
   function closeDetail() {
     state.detailOpen = false;
     refs.layout.classList.remove("is-detail-open");
+  }
+
+  function closeAccessDetail() {
+    state.accessDetailOpen = false;
+    refs.accessLayout.classList.remove("is-detail-open");
+  }
+
+  function renderAccessParserList() {
+    const query = state.accessQuery.trim().toLowerCase();
+    const visible = state.parsers
+      .filter(
+        (parser) =>
+          !query ||
+          parser.name.toLowerCase().includes(query) ||
+          parser.display_name.toLowerCase().includes(query),
+      )
+      .sort((left, right) =>
+        left.display_name.localeCompare(right.display_name, "zh-CN"),
+      );
+
+    refs.accessParserList.replaceChildren();
+    if (!visible.length) {
+      refs.accessParserList.append(
+        createElement(
+          "p",
+          "empty-state",
+          state.parsers.length ? "没有匹配的解析器。" : "没有可用的解析器。",
+        ),
+      );
+      return;
+    }
+
+    const motionKey = `${query}|${visible
+      .map(
+        (parser) =>
+          `${parser.name}:${parser.access_mode}:${parser.whitelist.length}:${parser.blacklist.length}`,
+      )
+      .join("|")}`;
+    const animateItems = state.accessMotionKey !== motionKey;
+    state.accessMotionKey = motionKey;
+
+    visible.forEach((parser, index) => {
+      const item = createElement("button", "parser-item");
+      item.type = "button";
+      item.dataset.name = parser.name;
+      item.setAttribute("role", "option");
+      item.setAttribute(
+        "aria-selected",
+        parser.name === state.selectedName ? "true" : "false",
+      );
+      item.style.setProperty("--item-index", String(Math.min(index, 9)));
+      if (animateItems) item.classList.add("is-entering");
+
+      const copy = createElement("span", "parser-copy");
+      copy.append(
+        createElement("span", "parser-name", parser.display_name),
+        createElement(
+          "span",
+          "parser-meta",
+          `白名单 ${parser.whitelist.length} · 黑名单 ${parser.blacklist.length}${parser.access_mode === "white" && parser.whitelist.length === 0 ? " · 全部拦截" : ""}`,
+        ),
+      );
+      item.append(copy);
+      item.addEventListener("click", () => selectAccessParser(parser.name));
+      item.addEventListener("animationend", () => {
+        item.classList.remove("is-entering");
+      });
+      refs.accessParserList.append(item);
+    });
+  }
+
+  function selectAccessParser(name) {
+    state.selectedName = name;
+    state.accessDetailOpen = true;
+    refs.accessLayout.classList.add("is-detail-open");
+    updateActiveRail();
+    renderAccessDetail();
+    if (window.matchMedia("(max-width: 840px)").matches) {
+      refs.accessDetail.scrollTop = 0;
+    }
+  }
+
+  function updateAccessActiveRail() {
+    for (const item of refs.accessParserList.querySelectorAll(".parser-item")) {
+      item.setAttribute(
+        "aria-selected",
+        item.dataset.name === state.selectedName ? "true" : "false",
+      );
+    }
+    updateParserActiveRail();
+  }
+
+  function updateParserActiveRail() {
+    for (const item of refs.parserList.querySelectorAll(".parser-item")) {
+      item.setAttribute(
+        "aria-selected",
+        item.dataset.name === state.selectedName ? "true" : "false",
+      );
+    }
+  }
+
+  function createAccessModeRow(parser, kind) {
+    const isWhite = kind === "white";
+    const row = createElement("div", "setting-row setting-row--switch");
+    const copy = createElement("div", "setting-copy");
+    copy.append(
+      createElement("span", "setting-label", isWhite ? "使用白名单" : "使用黑名单"),
+      createElement(
+        "p",
+        "setting-hint",
+        isWhite ? "开启后仅名单内的群聊可用。" : "开启后名单内的群聊不可用。",
+      ),
+    );
+    const control = createSwitch(
+      parser.access_mode === kind,
+      (checked) => {
+        if (checked) {
+          parser.access_mode = kind;
+        } else if (parser.access_mode === kind) {
+          parser.access_mode = "none";
+        }
+        refreshAccessDirtyState();
+        renderAccessDetail();
+      },
+      isWhite ? "使用白名单" : "使用黑名单",
+    );
+    row.append(copy, control);
+    return row;
+  }
+
+  function createGroupList(parser, kind) {
+    const listKey = kind === "white" ? "whitelist" : "blacklist";
+    const list = createElement("div", "group-list");
+    for (const groupId of parser[listKey]) {
+      const chip = createElement("span", "group-chip");
+      const label = createElement("span", "", groupId);
+      const remove = createElement("button", "");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `移除群号 ${groupId}`);
+      remove.innerHTML = ICONS.close;
+      remove.addEventListener("click", () => {
+        parser[listKey] = parser[listKey].filter((item) => item !== groupId);
+        refreshAccessDirtyState();
+        renderAccessDetail();
+      });
+      chip.append(label, remove);
+      list.append(chip);
+    }
+    return list;
+  }
+
+  function createAccessSection(parser, kind) {
+    const isWhite = kind === "white";
+    const listKey = isWhite ? "whitelist" : "blacklist";
+    const section = createElement("section", "field-section");
+    const header = createElement("header", "field-section__header group-section-head");
+    header.append(createElement("h2", "", isWhite ? "白名单" : "黑名单"));
+    const clear = createElement("button", "text-button text-button--danger", "清空");
+    clear.type = "button";
+    clear.disabled = parser[listKey].length === 0;
+    clear.addEventListener("click", () => {
+      parser[listKey] = [];
+      refreshAccessDirtyState();
+      renderAccessDetail();
+    });
+    header.append(clear);
+
+    const row = createElement("div", "setting-row");
+    const form = createElement("form", "group-add-row");
+    const field = createElement("div", "filled-field");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "numeric";
+    input.autocomplete = "off";
+    input.id = `access-${parser.name}-${kind}`;
+    input.setAttribute(
+      "aria-label",
+      `添加到${isWhite ? "白" : "黑"}名单的群号`,
+    );
+    const fieldLabel = document.createElement("label");
+    fieldLabel.htmlFor = input.id;
+    fieldLabel.textContent = "群号";
+    field.append(fieldLabel, input);
+    const add = createElement("button", "filled-button", "添加");
+    add.type = "submit";
+    form.append(field, add);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const groupId = input.value.trim();
+      if (!/^\d+$/.test(groupId)) {
+        showSnackbar("请输入有效的群号");
+        input.focus();
+        return;
+      }
+      if (parser[listKey].includes(groupId)) {
+        showSnackbar(`${groupId} 已在名单中`);
+        return;
+      }
+      parser[listKey] = [...parser[listKey], groupId];
+      refreshAccessDirtyState();
+      renderAccessDetail();
+    });
+    row.append(form, createGroupList(parser, kind));
+    row.append(
+      createElement(
+        "p",
+        "field-support",
+        isWhite
+          ? "填写群号，可通过命令 psr添加解析白名单{解析器} 来添加群聊"
+          : "填写群号，可通过命令 psr添加解析黑名单{解析器} 来添加群聊",
+      ),
+    );
+    section.append(header, row);
+    return section;
+  }
+
+  function renderAccessDetail() {
+    if (state.loadError) {
+      refs.accessDetail.innerHTML = `<div class="empty-state"><p>${escapeHtml(state.loadError)}</p></div>`;
+      return;
+    }
+    const parser = currentParser();
+    if (!parser) {
+      refs.accessDetail.innerHTML =
+        '<div class="empty-state"><p>选择左侧的解析器以编辑名单。</p></div>';
+      return;
+    }
+
+    if (parser.access_mode === "white" && parser.whitelist.length === 0) {
+      showSnackbar("白名单已开启但为空，当前所有群聊都会被拦截", 4200);
+    }
+
+    refs.accessDetail.innerHTML = `
+      <div class="detail-shell">
+        <header class="detail-header">
+          <div class="detail-title-row">
+            <button
+              class="icon-button back-button"
+              id="access-back"
+              type="button"
+              aria-label="返回解析器列表"
+              title="返回"
+            >
+              ${ICONS.back}
+            </button>
+            <div class="detail-heading">
+              <h1>${escapeHtml(parser.display_name)}</h1>
+              <p>${escapeHtml(parser.name)}</p>
+            </div>
+          </div>
+        </header>
+        <div class="detail-body"></div>
+      </div>`;
+    refs.accessDetail
+      .querySelector("#access-back")
+      .addEventListener("click", closeAccessDetail);
+    const body = refs.accessDetail.querySelector(".detail-body");
+    const modes = createElement("section", "field-section");
+    modes.append(
+      createAccessModeRow(parser, "white"),
+      createAccessModeRow(parser, "black"),
+    );
+    body.append(
+      modes,
+      createAccessSection(parser, "white"),
+      createAccessSection(parser, "black"),
+    );
   }
 
   function createSwitch(checked, onChange, label) {
@@ -598,12 +890,14 @@
       ?.addEventListener("click", closeDetail);
 
     const enabled = refs.parserDetail.querySelector("#parser-enabled");
-    enabled.addEventListener("change", () => {
-      draft.enabled = enabled.checked;
-      renderParserList();
-      renderDetail();
-      refreshGlobalSaveState();
-    });
+    if (enabled) {
+      enabled.addEventListener("change", () => {
+        draft.enabled = enabled.checked;
+        renderParserList();
+        renderDetail();
+        refreshGlobalSaveState();
+      });
+    }
     refreshGlobalSaveState();
   }
 
@@ -773,6 +1067,11 @@
     refreshGlobalSaveState();
   }
 
+  function refreshAccessDirtyState() {
+    renderAccessParserList();
+    refreshGlobalSaveState();
+  }
+
   function readNumber(field, value) {
     const parsed =
       field.type === "int" ? Number(value) : Number.parseFloat(value);
@@ -805,9 +1104,14 @@
   function discardAllDrafts() {
     for (const parser of state.parsers) {
       state.drafts.set(parser.name, createDraft(parser));
+      parser.access_mode = parser.base_access_mode;
+      parser.whitelist = [...parser.base_whitelist];
+      parser.blacklist = [...parser.base_blacklist];
     }
     renderParserList();
     renderDetail();
+    renderAccessParserList();
+    renderAccessDetail();
     refreshGlobalSaveState();
     showSnackbar("已撤销全部未保存的更改");
   }
@@ -815,12 +1119,20 @@
   async function saveAllDrafts() {
     if (state.saving) return;
     const dirty = dirtyEntries();
-    if (!dirty.length) return;
+    const dirtyAccess = dirtyAccessEntries();
+    if (!dirty.length && !dirtyAccess.length) return;
     let payloads;
+    let accessPayloads;
     try {
       payloads = dirty.map(({ parser, draft }) => ({
         name: parser.name,
         ...buildPayload(parser, draft),
+      }));
+      accessPayloads = dirtyAccess.map((parser) => ({
+        name: parser.name,
+        access_mode: parser.access_mode,
+        whitelist: parser.whitelist,
+        blacklist: parser.blacklist,
       }));
     } catch (error) {
       showSnackbar(error.message);
@@ -834,9 +1146,16 @@
     state.saving = true;
     refreshGlobalSaveState();
     try {
-      const response = await apiPost("parsers", {
-        parsers: payloads,
-      });
+      const response = payloads.length
+        ? await apiPost("parsers", {
+            parsers: payloads,
+          })
+        : null;
+      if (accessPayloads.length) {
+        await apiPost("access-lists", {
+          parsers: accessPayloads,
+        });
+      }
       for (const { parser, draft } of dirty) {
         parser.enabled = draft.enabled;
         for (const field of parser.fields) {
@@ -850,15 +1169,22 @@
           draft.clearedSecrets.delete(field.key);
         }
       }
+      for (const parser of dirtyAccess) {
+        parser.base_access_mode = parser.access_mode;
+        parser.base_whitelist = [...parser.whitelist];
+        parser.base_blacklist = [...parser.blacklist];
+      }
       state.saving = false;
       ensureSelection();
       renderParserList();
       renderDetail();
+      renderAccessParserList();
+      renderAccessDetail();
       refreshGlobalSaveState();
       if (hasToggle || response?.reload_required) {
         showSnackbar(`${dirty.length} 个平台的配置已保存。已变更解析器启停状态，请重载插件以完全生效`, 4500);
       } else {
-        showSnackbar(`${dirty.length} 个平台的配置已保存`);
+        showSnackbar("设置已保存");
       }
     } catch (error) {
       state.saving = false;
@@ -921,39 +1247,13 @@
     }
   }
 
-  async function loadProxy() {
-    try {
-      const data = await apiGet("proxy");
-      refs.proxyMessage.textContent = data?.message || "留空表示直连。";
-      refs.saveProxy.disabled = false;
-    } catch (error) {
-      refs.proxyMessage.textContent = `读取失败：${error.message || "未知错误"}`;
-      refs.saveProxy.disabled = true;
-    }
-  }
-
-  async function saveProxy() {
-    const value = refs.proxyUrl.value.trim();
-    refs.saveProxy.disabled = true;
-    refs.saveProxy.textContent = "保存中";
-    try {
-      const data = await apiPost("proxy", { value });
-      refs.proxyUrl.value = "";
-      refs.proxyMessage.textContent = data?.configured
-        ? "代理已保存，新任务将使用该代理。"
-        : "已清空代理，新任务将直连。";
-      showSnackbar("网络设置已保存");
-    } catch (error) {
-      showSnackbar(`保存失败：${error.message || "未知错误"}`);
-    } finally {
-      refs.saveProxy.disabled = false;
-      refs.saveProxy.textContent = "保存代理";
-    }
-  }
-
   async function loadParsers() {
     state.loadError = "";
     refs.parserList.innerHTML = `
+      <div class="list-skeleton" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>`;
+    refs.accessParserList.innerHTML = `
       <div class="list-skeleton" aria-hidden="true">
         <span></span><span></span><span></span>
       </div>`;
@@ -968,11 +1268,19 @@
       state.parsers = Array.isArray(data?.parsers) ? data.parsers : [];
       state.drafts.clear();
       for (const parser of state.parsers) {
+        parser.access_mode = parser.access_mode || "none";
+        parser.whitelist = normalizeGroupIds(parser.whitelist);
+        parser.blacklist = normalizeGroupIds(parser.blacklist);
+        parser.base_access_mode = parser.access_mode;
+        parser.base_whitelist = [...parser.whitelist];
+        parser.base_blacklist = [...parser.blacklist];
         state.drafts.set(parser.name, createDraft(parser));
       }
       ensureSelection();
       renderParserList();
       renderDetail();
+      renderAccessParserList();
+      renderAccessDetail();
     } catch (error) {
       state.parsers = [];
       state.drafts.clear();
@@ -985,7 +1293,7 @@
 
   function setActiveTab(name, updateHash = true) {
     const active =
-      name === "skins" ? "skins" : name === "network" ? "network" : "parsers";
+      name === "skins" ? "skins" : name === "access" ? "access" : "parsers";
     for (const tab of refs.tabs) {
       const selected = tab.dataset.tab === active;
       tab.classList.toggle("is-active", selected);
@@ -1009,7 +1317,6 @@
     setActiveTab(window.location.hash.slice(1));
     refs.saveAll.addEventListener("click", saveAllDrafts);
     refs.discardAll.addEventListener("click", discardAllDrafts);
-    refs.saveProxy.addEventListener("click", saveProxy);
   }
 
   function bindEvents() {
@@ -1017,7 +1324,10 @@
       state.query = refs.parserSearch.value;
       renderParserList();
     });
-
+    refs.accessSearch.addEventListener("input", () => {
+      state.accessQuery = refs.accessSearch.value;
+      renderAccessParserList();
+    });
   }
 
   function escapeHtml(value) {
@@ -1047,7 +1357,7 @@
       }
     }
 
-    await Promise.all([loadParsers(), loadSkins(), loadProxy()]);
+    await Promise.all([loadParsers(), loadSkins()]);
     refreshGlobalSaveState();
   }
 
