@@ -20,6 +20,8 @@ from gsuid_core.server import on_core_start, on_core_shutdown
 
 from .config import (
     parser_config,
+    trigger_feedback_text,
+    trigger_feedback_enabled,
     onebot_emoji_reaction_enabled,
 )
 from .utils.onebot import react_to_trigger_message
@@ -31,6 +33,12 @@ class Description(Protocol):
     """平台解析器生成的描述卡片数据。"""
 
 
+class Platform(Protocol):
+    """解析器声明的平台展示信息。"""
+
+    display_name: str
+
+
 class ContentItem(Protocol):
     """发送层接收的公共内容项。"""
 
@@ -39,6 +47,7 @@ class ParserEntry(Protocol):
     """注册表返回的解析器实例。"""
 
     config: ParserItemConfig
+    platform: Platform
 
     async def parse(
         self,
@@ -318,6 +327,8 @@ class ParserRuntime:
 
         host = urlsplit(normalized_source).hostname if _is_http_url(normalized_source) else "text"
         logger.info(f"[Parser·解析] 链接命中，开始解析 | parser={matched.keyword} | host={host or 'unknown'}")
+        if trigger_feedback_enabled():
+            await self._send_trigger_feedback(bot, matched.parser.platform.display_name)
         if onebot_emoji_reaction_enabled():
             reaction_task = asyncio.create_task(
                 react_to_trigger_message(ev),
@@ -335,6 +346,13 @@ class ParserRuntime:
         task.add_done_callback(self._on_task_done)
         bot.bot._add_bg_task(task)
         return True
+
+    async def _send_trigger_feedback(self, bot: Bot, platform_display_name: str) -> None:
+        try:
+            await bot.send(trigger_feedback_text(platform_display_name))
+        except Exception as exc:
+            error_text = sanitize_error_text(str(exc))
+            logger.warning(f"[Parser·反馈] 触发文字反馈发送失败 | error_type={type(exc).__name__} | error={error_text}")
 
     async def _sync_limits(self) -> None:
         timeout = int(parser_config.get_config("task_timeout_seconds").data)

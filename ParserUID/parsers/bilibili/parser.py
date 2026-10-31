@@ -77,7 +77,7 @@ BROWSER_USER_AGENT = (
 
 class StreamSelection(TypedDict):
     video: list[str]
-    audio: list[str] | None
+    audio: list[list[str]]
     quality: str
     resolution: str
     duration: int
@@ -530,10 +530,9 @@ class BilibiliParser(BaseParser):
             audios = self._normalize_streams(raw_audios, kind="audio")
             if videos:
                 selected = videos[0]
-                selected_audio = audios[0] if audios else None
                 return StreamSelection(
                     video=_string_list(selected["urls"]),
-                    audio=_string_list(selected_audio["urls"]) if selected_audio else None,
+                    audio=[_string_list(item["urls"]) for item in audios],
                     quality=str(selected["quality"]),
                     resolution=str(selected["resolution"]),
                     duration=duration,
@@ -544,7 +543,7 @@ class BilibiliParser(BaseParser):
             if urls:
                 return StreamSelection(
                     video=urls,
-                    audio=None,
+                    audio=[],
                     quality="MP4",
                     resolution="",
                     duration=duration,
@@ -681,7 +680,7 @@ class BilibiliParser(BaseParser):
     def _build_video_content(
         self,
         videos: list[str],
-        audios: list[str] | None,
+        audios: list[list[str]],
         cover: str | None,
         duration: int,
     ) -> MediaContent:
@@ -693,25 +692,30 @@ class BilibiliParser(BaseParser):
             if output_path.exists():
                 return output_path
             if audios:
-                last_error: Exception | None = None
-                for video_url in videos:
-                    for audio_url in audios:
-                        try:
-                            v_tmp = await self.downloader.download_video(
-                                video_url,
-                                headers=self.media_headers,
-                                proxy=self.proxy,
-                            )
-                            a_tmp = await self.downloader.download_audio(
-                                audio_url,
-                                headers=self.media_headers,
-                                proxy=self.proxy,
-                            )
-                            return await merge_av(video_path=v_tmp, audio_path=a_tmp, output_path=output_path)
-                        except (ParseException, OSError) as exc:
-                            last_error = exc
+                last_error: ParseException | OSError | None = None
+                for audio_urls in audios:
+                    for video_url in videos:
+                        for audio_url in audio_urls:
+                            try:
+                                v_tmp = await self.downloader.download_video(
+                                    video_url,
+                                    headers=self.media_headers,
+                                    proxy=self.proxy,
+                                )
+                                a_tmp = await self.downloader.download_audio(
+                                    audio_url,
+                                    headers=self.media_headers,
+                                    proxy=self.proxy,
+                                )
+                                return await merge_av(
+                                    video_path=v_tmp,
+                                    audio_path=a_tmp,
+                                    output_path=output_path,
+                                )
+                            except (ParseException, OSError) as exc:
+                                last_error = exc
                 raise ParseException("视频音轨下载或合并失败") from last_error
-            last_error: Exception | None = None
+            last_error: ParseException | OSError | None = None
             for video_url in videos:
                 try:
                     return await self.downloader.download_video(

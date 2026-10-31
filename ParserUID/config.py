@@ -11,6 +11,7 @@ from gsuid_core.utils.plugins_config.models import (
     GsIntConfig,
     GsStrConfig,
     GsBoolConfig,
+    GsTimeRConfig,
 )
 from gsuid_core.utils.plugins_config.gs_config import StringConfig
 
@@ -31,7 +32,7 @@ CONFIG_DEFAULT: dict[str, GSC] = {
     ),
     "onebot_emoji_reaction": GsBoolConfig(
         title="对 OneBotUID 触发解析时启用贴表情",
-        desc="仅在通过 OneBotUID 连接至 GsCore 时生效；解析命中后对触发消息贴睁眼表情（289），未安装 OneBotUID 时自动跳过。",
+        desc="仅在通过 OneBotUID 连接至 GsCore 时生效；解析命中后对触发消息贴睁眼表情，未安装 OneBotUID 时自动跳过。",
         data=False,
     ),
     "send_render_preview": GsBoolConfig(
@@ -43,6 +44,16 @@ CONFIG_DEFAULT: dict[str, GSC] = {
         title="发送解析结果",
         desc="关闭后，解析器调用 result() 时丢弃解析结果，不再发送媒体内容。",
         data=True,
+    ),
+    "send_trigger_feedback": GsBoolConfig(
+        title="解析触发文字反馈",
+        desc="开启后，解析链接命中并进入后台解析时，发送文字反馈。",
+        data=False,
+    ),
+    "trigger_feedback_text": GsStrConfig(
+        title="解析触发反馈文本",
+        desc="发送触发反馈时使用；{} 会替换为解析器的平台名称。",
+        data="识别 | {}",
     ),
     "proxy_url": GsStrConfig(
         title="代理地址",
@@ -79,6 +90,16 @@ CONFIG_DEFAULT: dict[str, GSC] = {
         title="防抖秒数",
         desc="同一会话重复链接的忽略时长；0 表示关闭防抖。",
         data=300,
+    ),
+    "cache_retention_days": GsIntConfig(
+        title="缓存保留天数",
+        desc="定时清理时删除超过该天数的下载和渲染缓存文件；最小生效值为 1。",
+        data=1,
+    ),
+    "cache_cleanup_time": GsTimeRConfig(
+        title="缓存清理时间",
+        desc="每天自动清理缓存的时间（时，分）。",
+        data=(2, 0),
     ),
 }
 
@@ -200,6 +221,17 @@ def parse_result_enabled() -> bool:
     return bool(parser_config.get_config("send_parse_result").data)
 
 
+def trigger_feedback_enabled() -> bool:
+    """返回是否在解析触发时发送文字反馈。"""
+    return bool(parser_config.get_config("send_trigger_feedback").data)
+
+
+def trigger_feedback_text(platform_display_name: str) -> str:
+    """按配置生成触发反馈，并将占位符替换为平台可视名称。"""
+    template = str(parser_config.get_config("trigger_feedback_text").data)
+    return template.replace("{}", platform_display_name)
+
+
 def onebot_emoji_reaction_enabled() -> bool:
     """返回是否对 OneBotUID 触发的解析消息贴表情。"""
     return bool(parser_config.get_config("onebot_emoji_reaction").data)
@@ -221,6 +253,20 @@ def max_audio_duration_seconds() -> float:
     """返回单音频时长上限，单位秒。"""
     minutes = max(1, int(parser_config.get_config("max_audio_duration_minutes").data))
     return float(minutes * 60)
+
+
+def cache_retention_seconds() -> int:
+    """返回缓存保留时长，单位秒。"""
+    days = max(1, int(parser_config.get_config("cache_retention_days").data))
+    return days * 24 * 60 * 60
+
+
+def cache_cleanup_hour_minute() -> tuple[int, int]:
+    """返回已约束到合法范围内的缓存清理时、分。"""
+    value = parser_config.get_config("cache_cleanup_time").data
+    hour = min(23, max(0, int(value[0])))
+    minute = min(59, max(0, int(value[1])))
+    return hour, minute
 
 
 def proxy_url() -> str | None:

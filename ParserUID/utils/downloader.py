@@ -113,9 +113,10 @@ class Downloader:
                 return await self._stream_download(candidate_url, target, headers, proxy, limit)
             except Exception as exc:
                 last_error = exc
+                status = f" | status={exc.message}" if isinstance(exc, DownloadException) else ""
                 logger.warning(
                     f"[Parser·下载] 地址下载失败 | host={urlparse(candidate_url).hostname or 'unknown'} "
-                    f"| attempt={attempt}/{len(candidates)} | error_type={type(exc).__name__}"
+                    f"| attempt={attempt}/{len(candidates)} | error_type={type(exc).__name__}{status}"
                 )
 
         raise DownloadException(f"文件下载失败（尝试了 {len(candidates)} 个地址）：{last_error}")
