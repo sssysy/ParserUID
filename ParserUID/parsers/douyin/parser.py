@@ -23,7 +23,7 @@ from .models import (
 )
 from ...utils.utils import format_num
 from ...utils.models import Platform, MediaContent
-from ...render.models import Metric, Comment
+from ...render.models import Metric, Comment, ImageBlock
 from ...utils.exceptions import ParseException
 
 
@@ -288,6 +288,7 @@ class DouYinParser(BaseParser):
                 metrics=aweme.metrics,
                 comments=tuple(comments),
                 timestamp=aweme.create_time or None,
+                blocks=self._image_blocks(aweme),
             )
         else:
             await self.send_info(
@@ -411,6 +412,16 @@ class DouYinParser(BaseParser):
             return items
 
         return []
+
+    @staticmethod
+    def _image_blocks(aweme: Aweme) -> tuple[ImageBlock, ...]:
+        if aweme.images is None:
+            return ()
+        blocks: list[ImageBlock] = []
+        for image in aweme.images:
+            if image.clip_type in (2, 5, None) and image.url_list:
+                blocks.append(ImageBlock(url=image.url_list[0]))
+        return tuple(blocks)
 
     async def _fetch_comments(self, aweme_id: str) -> list[Comment]:
         if not self.config.get_bool("include_comments", False):

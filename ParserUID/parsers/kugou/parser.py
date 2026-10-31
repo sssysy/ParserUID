@@ -17,6 +17,7 @@ from gsuid_core.logger import logger
 from ..base import BaseParser, handle
 from .models import (
     KugouPlayInfo,
+    KugouSharePageParam,
     LyricSearchResponse,
     LyricDownloadResponse,
 )
@@ -32,6 +33,7 @@ HASH_RE = re.compile(
     flags=re.DOTALL,
 )
 JSON_HASH_RE = re.compile(r'"hash"\s*:\s*"([0-9A-Fa-f]{32})"')
+SHARE_PARAM_RE = re.compile(r"var phpParam\s*=\s*", flags=re.IGNORECASE)
 MOBILE_UA = (
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 )
@@ -55,10 +57,9 @@ class KugouParser(BaseParser):
 
     @handle(
         "kugou.com",
-        r"https?://[^\s]*?kugou\.com[^\s]*?(?:"
-        r"/(?:share|mixsong)/[A-Za-z0-9]+\.html"
-        r"|hash=(?P<hash>[0-9A-Fa-f]{32})"
-        r"|chain=(?P<chain>[A-Za-z0-9]+)"
+        r"https?://(?:[A-Za-z0-9-]+\.)*kugou\.com/"
+        r"(?:(?:share|mixsong)/[A-Za-z0-9]+\.html(?:\?[^\s#]*)?"
+        r"|(?P<query_path>[^\s#]*[?&](?:hash|chain)=[^\s#&]+)"
         r")",
     )
     async def _parse_share(self, searched: re.Match[str]) -> Sequence[ContentItem]:
@@ -78,39 +79,56 @@ class KugouParser(BaseParser):
         except httpx.HTTPError as exc:
             raise ParseException(f"酷狗分享页请求失败：{exc}") from exc
 
-        song_hash = _extract_hash(html)
+        share_data = _extract_share_data(html)
+        song_hash = share_data.song_info.data.hash if share_data is not None else _extract_hash(html)
+        if not song_hash:
+            song_hash = _extract_hash(html)
         if not song_hash:
             raise ParseException("未找到酷狗歌曲 hash")
-        return await self._parse_hash(song_hash)
+        return await self._parse_hash(song_hash, share_data=share_data)
 
-    async def _parse_hash(self, song_hash: str) -> Sequence[ContentItem]:
+    async def _parse_hash(
+        self,
+        song_hash: str,
+        *,
+        share_data: KugouSharePageParam | None = None,
+    ) -> Sequence[ContentItem]:
         upper_hash = song_hash.upper()
-        client = await self.get_client()
-        headers = {"Referer": "https://m.kugou.com/"}
-        try:
-            resp = await client.get(
-                SONG_INFO_URL,
-                params={"cmd": "playInfo", "hash": upper_hash},
-                headers=headers,
+        play_info: KugouPlayInfo | None = None
+        if share_data is None or not share_data.song_info.data.url:
+            play_info = await self._fetch_play_info(upper_hash)
+
+        if share_data is not None:
+            data = share_data.song_info.data
+            audio_url = data.url or (play_info.url if play_info is not None else "")
+            title = data.songName or (play_info.songName if play_info is not None else "") or "未知歌曲"
+            artist = data.singerName or (play_info.singerName if play_info is not None else "") or "未知歌手"
+            duration = max(
+                0.0,
+                float(data.timeLength or (play_info.timeLength if play_info is not None else 0.0)),
             )
-            if resp.status_code >= 400:
-                raise ParseException(f"酷狗接口状态码 {resp.status_code}")
-            play_info = msgspec.json.decode(resp.content, type=KugouPlayInfo)
-        except (httpx.HTTPError, msgspec.DecodeError) as exc:
-            raise ParseException(f"酷狗歌曲请求失败：{exc}") from exc
+            actual_hash = data.hash or (play_info.hash if play_info is not None else "") or upper_hash
+            album_audio_id = data.album_audio_id or (play_info.album_audio_id if play_info is not None else 0)
+            cover_url = _cover_url(data.album_img or (play_info.album_img if play_info is not None else ""))
+            bitrate = data.bitRate or (play_info.bitRate if play_info is not None else 0)
+            fallback_urls = tuple(url for url in data.backup_url if url and url != audio_url)
+        else:
+            if play_info is None:
+                raise ParseException("酷狗歌曲不可播放")
+            if play_info.errcode != 0:
+                raise ParseException("酷狗歌曲不可播放")
+            audio_url = play_info.url
+            title = play_info.songName or "未知歌曲"
+            artist = play_info.singerName or "未知歌手"
+            duration = max(0.0, float(play_info.timeLength))
+            actual_hash = play_info.hash or upper_hash
+            album_audio_id = play_info.album_audio_id
+            cover_url = _cover_url(play_info.album_img)
+            bitrate = play_info.bitRate
+            fallback_urls = ()
 
-        if play_info.errcode != 0:
-            raise ParseException("酷狗歌曲不可播放")
-
-        audio_url = play_info.url
         if not audio_url:
             raise ParseException("未找到酷狗音频地址")
-
-        title = play_info.songName or "未知歌曲"
-        artist = play_info.singerName or "未知歌手"
-        duration = max(0.0, float(play_info.timeLength))
-        actual_hash = play_info.hash or upper_hash
-        album_audio_id = play_info.album_audio_id
 
         lyric = ""
         try:
@@ -118,19 +136,19 @@ class KugouParser(BaseParser):
         except Exception as exc:
             logger.warning(f"[酷狗] 歌词获取失败 | hash={actual_hash} | error={exc}")
 
-        cover_url = play_info.album_img.replace("{size}", "480") if play_info.album_img else None
-
         async def load_audio() -> Path:
-            return await self.downloader.download_audio(
+            path = await self.downloader.download_file(
                 audio_url,
+                filename=f"kugou_{actual_hash.lower()}.mp3",
                 headers={"Referer": "https://m.kugou.com/"},
                 proxy=self.proxy,
+                fallback_urls=fallback_urls,
             )
+            return path
 
         audio = self.create_audio_content(loader=load_audio, duration=duration)
         author = self.create_author(artist)
 
-        bitrate = play_info.bitRate
         info_parts: list[str] = []
         if bitrate > 0:
             info_parts.append(f"比特率: {bitrate}K")
@@ -154,6 +172,21 @@ class KugouParser(BaseParser):
         if lyric:
             items.append(self.create_text_content(lyric))
         return self.result(items)
+
+    async def _fetch_play_info(self, song_hash: str) -> KugouPlayInfo:
+        client = await self.get_client()
+        headers = {"Referer": "https://m.kugou.com/"}
+        try:
+            resp = await client.get(
+                SONG_INFO_URL,
+                params={"cmd": "playInfo", "hash": song_hash},
+                headers=headers,
+            )
+            if resp.status_code >= 400:
+                raise ParseException(f"酷狗接口状态码 {resp.status_code}")
+            return msgspec.json.decode(resp.content, type=KugouPlayInfo)
+        except (httpx.HTTPError, msgspec.DecodeError) as exc:
+            raise ParseException(f"酷狗歌曲请求失败：{exc}") from exc
 
     async def _fetch_lyric(self, song_hash: str) -> str:
         client = await self.get_client()
@@ -205,6 +238,50 @@ class KugouParser(BaseParser):
             return decoded.decode(charset, errors="replace").strip()
         except (ValueError, LookupError):
             return ""
+
+
+def _extract_share_data(html: str) -> KugouSharePageParam | None:
+    match = SHARE_PARAM_RE.search(html)
+    if match is None:
+        return None
+    payload = _extract_balanced_json_object(html, match.end())
+    if payload is None:
+        return None
+    try:
+        return msgspec.json.decode(payload.encode("utf-8"), type=KugouSharePageParam)
+    except msgspec.DecodeError:
+        return None
+
+
+def _extract_balanced_json_object(text: str, start: int) -> str | None:
+    if start >= len(text) or text[start] != "{":
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
+def _cover_url(url: str) -> str | None:
+    return url.replace("{size}", "480") if url else None
 
 
 def _extract_hash(html: str) -> str:

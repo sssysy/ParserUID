@@ -38,7 +38,7 @@ VIDEO_DPI: Final = 96.0
 PACK_DIR: Final = Path(__file__).resolve().parent / "pack"
 CACHE_DIR: Final = get_res_path("ParserUID") / "render_cache"
 RENDER_CACHE_MAX_AGE_SECONDS: Final = 7 * 24 * 60 * 60
-_RENDER_VERSION: Final = "7"
+_RENDER_VERSION: Final = "11"
 _SKIN_NAME_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 
 
