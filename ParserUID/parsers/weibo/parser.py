@@ -10,6 +10,7 @@ from typing import ClassVar
 from urllib.parse import unquote, parse_qs, urlparse
 from collections.abc import Sequence
 
+import httpx
 import msgspec
 
 from gsuid_core.logger import logger
@@ -23,11 +24,16 @@ from .models import (
     parse_weibo_timestamp,
     format_weibo_timestamp,
 )
+from ..config import ParserItemConfig
 from .content import comment_text, clean_status_text, parse_article_blocks
 from ...sender import ContentItem
 from ...utils.models import Platform
 from ...render.models import Author, Metric, Comment, PreviewCard, CommentReply
 from ...utils.exceptions import ParseException
+
+VISITOR_GEN_URL = "https://passport.weibo.com/visitor/genvisitor"
+VISITOR_URL = "https://passport.weibo.com/visitor/visitor"
+VISITOR_HOSTS = frozenset({"passport.weibo.com", "visitor.passport.weibo.cn"})
 
 
 def _count(value: object) -> str | None:
@@ -85,8 +91,51 @@ def comment_limit(value: object) -> int:
         return 5
 
 
+def _is_visitor_response(response: httpx.Response) -> bool:
+    return urlparse(str(response.url)).hostname in VISITOR_HOSTS
+
+
+def _decode_jsonp(text: str, callback: str) -> object:
+    marker = f"{callback}("
+    start = text.find(marker)
+    if start < 0:
+        raise ParseException("微博游客会话获取失败")
+    start += len(marker)
+    end = text.rfind(")")
+    if end <= start:
+        raise ParseException("微博游客会话获取失败")
+    payload: object = msgspec.json.decode(text[start:end])
+    return payload
+
+
+def _visitor_ticket(payload: object) -> tuple[str, bool, int]:
+    if not isinstance(payload, dict):
+        raise ParseException("微博游客会话获取失败")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ParseException("微博游客会话获取失败")
+    tid = data.get("tid")
+    if not isinstance(tid, str) or not tid:
+        raise ParseException("微博游客会话获取失败")
+    new_tid = data.get("new_tid") is True
+    raw_confidence = data.get("confidence", 100)
+    confidence = raw_confidence if type(raw_confidence) is int else 100
+    return tid, new_tid, confidence
+
+
+async def _response_json(response: httpx.Response) -> dict[str, object]:
+    payload: object = msgspec.json.decode(response.content)
+    if not isinstance(payload, dict):
+        raise ParseException("微博接口响应格式异常")
+    return {str(key): value for key, value in payload.items()}
+
+
 class WeiboParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name="weibo", display_name="微博")
+
+    def __init__(self, config: ParserItemConfig | None = None) -> None:
+        super().__init__(config)
+        self._visitor_session_ready = False
 
     @property
     def media_headers(self) -> dict[str, str]:
@@ -186,6 +235,59 @@ class WeiboParser(BaseParser):
         matched = searched.group(0)
         return matched if matched.startswith(("http://", "https://")) else ""
 
+    async def _refresh_visitor_session(self) -> None:
+        client = await self.get_client()
+        chrome_version = re.search(r"Chrome/(\d+)", self.media_headers["User-Agent"])
+        browser = f"Chrome{chrome_version.group(1) if chrome_version is not None else '132'},0,0,0"
+        fingerprint = json.dumps(
+            {
+                "os": "1",
+                "browser": browser,
+                "fonts": "undefined",
+                "screenInfo": "1920*1080*24",
+                "plugins": "",
+            },
+            separators=(",", ":"),
+        )
+        headers = {
+            "User-Agent": self.media_headers["User-Agent"],
+            "Referer": "https://passport.weibo.com/visitor/visitor",
+        }
+        generated = await client.post(
+            VISITOR_GEN_URL,
+            data={"cb": "gen_callback", "fp": fingerprint},
+            headers=headers,
+        )
+        if generated.status_code >= 400:
+            raise ParseException(f"微博游客会话获取失败：HTTP {generated.status_code}")
+        ticket = _visitor_ticket(_decode_jsonp(generated.text, "gen_callback"))
+        tid, new_tid, confidence = ticket
+        incarnated = await client.get(
+            VISITOR_URL,
+            params={
+                "a": "incarnate",
+                "t": tid,
+                "w": 3 if new_tid else 2,
+                "c": f"{confidence:03d}",
+                "gc": "",
+                "cb": "cross_domain",
+                "from": "weibo",
+                "_rand": time.time(),
+            },
+            headers=headers,
+        )
+        if incarnated.status_code >= 400:
+            raise ParseException(f"微博游客会话获取失败：HTTP {incarnated.status_code}")
+        self._visitor_session_ready = True
+
+    async def _ensure_visitor_session(self) -> None:
+        if self._visitor_session_ready:
+            return
+        if self.get_config_value("cookie").strip():
+            self._visitor_session_ready = True
+            return
+        await self._refresh_visitor_session()
+
     async def _request_json(
         self,
         url: str,
@@ -195,39 +297,44 @@ class WeiboParser(BaseParser):
         headers: dict[str, str] | None = None,
         error: str,
     ) -> dict[str, object]:
+        await self._ensure_visitor_session()
         client = await self.get_client()
         request_headers = {**self.media_headers, **(headers or {})}
         retries = 2
         last_error: Exception | None = None
-        for attempt in range(retries + 1):
+        attempt = 0
+        visitor_refreshed = False
+        while attempt <= retries:
             try:
                 if data is not None:
                     response = await client.post(url, data=data, headers=request_headers)
                 else:
                     response = await client.get(url, params=params, headers=request_headers)
-                if response.status_code >= 400:
-                    raise ParseException(f"HTTP 请求错误 {response.status_code}")
-                content_type = response.headers.get("content-type", "")
-                if "json" not in content_type.lower():
-                    raise ParseException(f"{error}：接口返回非 JSON")
-                payload = msgspec.json.decode(response.content)
-                if not isinstance(payload, dict):
-                    raise ParseException(f"{error}：响应格式异常")
-                return {str(k): v for k, v in payload.items()}
-            except ParseException:
-                raise
             except Exception as exc:
                 last_error = exc
                 if attempt < retries:
+                    attempt += 1
                     await asyncio.sleep(1 + attempt)
                     continue
                 raise ParseException(error) from exc
+            if _is_visitor_response(response):
+                if visitor_refreshed:
+                    raise ParseException(f"{error}：微博游客会话无效")
+                await self._refresh_visitor_session()
+                visitor_refreshed = True
+                continue
+            if response.status_code >= 400:
+                raise ParseException(f"HTTP 请求错误 {response.status_code}")
+            content_type = response.headers.get("content-type", "")
+            if "json" not in content_type.lower():
+                raise ParseException(f"{error}：接口返回非 JSON")
+            return await _response_json(response)
         raise ParseException(error) from last_error
 
     async def _fetch_status(self, weibo_id: str) -> WeiboStatus:
         payload = await self._request_json(
-            f"https://m.weibo.cn/statuses/show?id={weibo_id}",
-            params={"_": int(time.time() * 1000)},
+            "https://m.weibo.cn/statuses/show",
+            params={"id": weibo_id, "_": int(time.time() * 1000)},
             headers={
                 "Referer": f"https://m.weibo.cn/detail/{weibo_id}",
                 "Accept": "application/json, text/plain, */*",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import asyncio
+import base64
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from ParserUID.render.models import (
     PreviewCard,
     CommentReply,
 )
+from ParserUID.render.template_data import TemplateCard
 from ParserUID.render.runtime import render_preview
 from ParserUID.utils.exceptions import DownloadException
 from ParserUID.render.template_data import CARD_FOOTER
@@ -100,6 +102,11 @@ def _assert_png(path: Path) -> None:
     with Image.open(io.BytesIO(data)) as image:
         assert image.width == 1000
         assert image.height > 300
+
+
+def _decode_data_uri(uri: str) -> Image.Image:
+    encoded = uri.split(",", 1)[1]
+    return Image.open(io.BytesIO(base64.b64decode(encoded)))
 
 
 @pytest.fixture(autouse=True)
@@ -196,6 +203,48 @@ def test_tall_content_image_keeps_full_height(tmp_path: Path) -> None:
     single_image_start = html.index('<div class="single-image">')
     single_image_end = html.index("</div>", single_image_start)
     assert "object-fit:cover" not in html[single_image_start:single_image_end]
+
+
+def test_tall_cover_keeps_full_height(tmp_path: Path) -> None:
+    tall = _image(tmp_path / "tall_cover.png", (560, 1400), (40, 90, 160))
+    card = PreviewCard(
+        platform_name="tieba",
+        platform_display_name="百度贴吧",
+        title="竖版封面完整显示",
+        cover_path=tall,
+    )
+
+    ready_card = asyncio.run(render_runtime.ensure_card_assets(card))
+    context = asyncio.run(prepare_context(ready_card))
+    template_card = context["card"]
+    assert isinstance(template_card, TemplateCard)
+    assert template_card.show_hero
+    with _decode_data_uri(template_card.hero_uri) as image:
+        assert image.width == 1240
+        assert image.height == 3100
+
+
+def test_tall_video_cover_keeps_full_height(tmp_path: Path) -> None:
+    tall = _image(tmp_path / "tall_video_cover.png", (560, 1400), (40, 90, 160))
+    card = PreviewCard(
+        platform_name="tieba",
+        platform_display_name="百度贴吧",
+        title="竖版视频封面完整显示",
+        cover_path=tall,
+        card_type="video",
+    )
+
+    ready_card = asyncio.run(render_runtime.ensure_card_assets(card))
+    context = asyncio.run(prepare_context(ready_card))
+    template_card = context["card"]
+    assert isinstance(template_card, TemplateCard)
+    with _decode_data_uri(template_card.hero_uri) as image:
+        assert image.width == 1000
+        assert image.height == 2500
+
+    _, _, environment = render_runtime.load_skin_pack("default")
+    html = environment.get_template("video.html").render(**context)
+    assert ".hero-img{display:block;width:1000px;height:auto;object-fit:contain}" in html
 
 
 def test_two_content_images_stack_without_cropping(tmp_path: Path) -> None:

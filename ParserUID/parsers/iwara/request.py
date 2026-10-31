@@ -61,8 +61,9 @@ class IwaraClient:
 
     async def close(self) -> None:
         if self._session is not None:
-            await self._session.close()
+            session = self._session
             self._session = None
+            await session.close()
 
     def _request_headers(self) -> dict[str, str]:
         headers = self.headers.copy()

@@ -38,7 +38,7 @@ VIDEO_DPI: Final = 96.0
 PACK_DIR: Final = Path(__file__).resolve().parent / "pack"
 CACHE_DIR: Final = get_res_path("ParserUID") / "render_cache"
 RENDER_CACHE_MAX_AGE_SECONDS: Final = 7 * 24 * 60 * 60
-_RENDER_VERSION: Final = "11"
+_RENDER_VERSION: Final = "13"
 _SKIN_NAME_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 
 
@@ -199,7 +199,7 @@ async def ensure_card_assets(card: PreviewCard, *, proxy: str | None = None) -> 
             blocks.append(block)
         elif isinstance(block, ImageBlock):
             block_path = await _download_asset_safely(block.url, block.path, proxy=proxy)
-            blocks.append(ImageBlock(path=block_path, url=block.url, caption=block.caption) if block_path else block)
+            blocks.append(ImageBlock(path=block_path, caption=block.caption) if block_path is not None else block)
 
     comments: list[Comment] = []
     for comment in card.comments:

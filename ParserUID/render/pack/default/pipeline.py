@@ -243,9 +243,9 @@ async def _hero_data(card: PreviewCard, *, dark: bool, proxy: str | None) -> str
         return ""
     source = read_rgba(path)
     if dark:
-        hero = fit_cover(source, (VIDEO_WIDTH, 540))
+        hero = fit_width(source, VIDEO_WIDTH)
         return data_uri(fade_vertical(hero, top_ratio=0.12, bottom_ratio=0.28))
-    cover = fit_cover(source, (1240, 700))
+    cover = fit_width(source, 1240)
     cover = fade_vertical(cover, top_ratio=0.09, bottom_ratio=0.2)
     return data_uri(cover)
 

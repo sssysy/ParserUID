@@ -1247,6 +1247,10 @@ class XiaoheiheClient:
     @property
     def session(self) -> AsyncSession:
         if self._session is None:
+            try:
+                from curl_cffi.requests import AsyncSession
+            except ImportError as exc:
+                raise ParseException("未安装 curl_cffi，无法调用小黑盒接口") from exc
             self._session = AsyncSession(
                 headers=self.headers,
                 timeout=self.timeout,
@@ -1257,8 +1261,9 @@ class XiaoheiheClient:
 
     async def close(self) -> None:
         if self._session is not None:
-            await self._session.close()
+            session = self._session
             self._session = None
+            await session.close()
         self._device_id = None
 
     @property

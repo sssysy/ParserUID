@@ -104,7 +104,7 @@ class NeteaseParser(BaseParser):
         "music.163.com",
         r"https?://music\.163\.com/(?:"
         r"song/(?P<path_id>\d+)"
-        r"|(?:#/)?song\?[^\s]*id=(?P<query_id>\d+)"
+        r"|(?:#/)?song\?[^\s]*\bid=(?P<query_id>\d+)"
         r")",
     )
     async def _parse_song(self, searched: re.Match[str]) -> Sequence[ContentItem]:
