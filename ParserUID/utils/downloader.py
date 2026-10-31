@@ -20,9 +20,9 @@ from gsuid_core.logger import logger
 from gsuid_core.data_store import get_res_path
 
 from .ffmpeg import FFmpegUnavailable, exec_ffmpeg_cmd
+from ..config import max_file_size_bytes
 from .exceptions import DownloadException
 
-DEFAULT_MAX_BYTES: Final = 500 * 1024 * 1024
 DEFAULT_IMAGE_MAX_BYTES: Final = 20 * 1024 * 1024
 DEFAULT_CACHE_MAX_AGE_SECONDS: Final = 7 * 24 * 60 * 60
 CACHE_DIR: Final = get_res_path("ParserUID") / "cache"
@@ -94,10 +94,11 @@ class Downloader:
         filename: str | None = None,
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
-        max_bytes: int = DEFAULT_MAX_BYTES,
+        max_bytes: int | None = None,
         fallback_urls: Sequence[str] | None = None,
     ) -> Path:
         """流式分块下载文件到插件缓存目录。"""
+        limit = max_file_size_bytes() if max_bytes is None else max_bytes
         actual_name = filename if filename is not None else self._url_to_filename(url)
         target = self.cache_dir / actual_name
 
@@ -109,7 +110,7 @@ class Downloader:
 
         for attempt, candidate_url in enumerate(candidates, start=1):
             try:
-                return await self._stream_download(candidate_url, target, headers, proxy, max_bytes)
+                return await self._stream_download(candidate_url, target, headers, proxy, limit)
             except Exception as exc:
                 last_error = exc
                 logger.warning(
@@ -177,7 +178,7 @@ class Downloader:
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
         fallback_urls: Sequence[str] | None = None,
-        max_bytes: int = DEFAULT_MAX_BYTES,
+        max_bytes: int | None = None,
     ) -> Path:
         """下载视频流文件。"""
         filename = self._url_to_filename(url, default_suffix=".mp4")
@@ -196,7 +197,7 @@ class Downloader:
         *,
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
-        max_bytes: int = DEFAULT_MAX_BYTES,
+        max_bytes: int | None = None,
     ) -> Path:
         """下载音频流文件。"""
         filename = self._url_to_filename(url, default_suffix=".mp3")
@@ -216,10 +217,11 @@ class Downloader:
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
         fallback_urls: Sequence[str] | None = None,
-        max_bytes: int = DEFAULT_MAX_BYTES,
+        max_bytes: int | None = None,
         timeout: float = _HLS_TIMEOUT,
     ) -> Path:
         """通过 FFmpeg 下载 HLS 并封装为本地 MP4。"""
+        limit = max_file_size_bytes() if max_bytes is None else max_bytes
         candidates = [item for item in (url, *(fallback_urls or ())) if item]
         if not candidates:
             raise DownloadException("HLS 地址为空")
@@ -243,7 +245,7 @@ class Downloader:
                         temporary,
                         headers=headers,
                         proxy=proxy,
-                        max_bytes=max_bytes,
+                        max_bytes=limit,
                         timeout=timeout,
                     )
                     await asyncio.to_thread(os.replace, temporary, target)
@@ -316,8 +318,10 @@ class Downloader:
         cookiefile: Path | None = None,
         download_ranges: str | None = None,
         audio_only: bool = False,
+        max_bytes: int | None = None,
     ) -> Path:
         """使用 yt-dlp 后台线程提取并下载多媒体。"""
+        limit = max_file_size_bytes() if max_bytes is None else max_bytes
         try:
             import yt_dlp
         except ImportError as exc:
@@ -342,18 +346,27 @@ class Downloader:
                 opts.update(custom_opts)
             if download_ranges:
                 opts["download_ranges"] = _ytdlp_download_range(download_ranges)
+            opts["max_filesize"] = limit
 
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
+                if info is None:
+                    raise DownloadException("yt-dlp 未返回媒体信息")
                 downloaded_file = ydl.prepare_filename(info)
                 result_path = Path(downloaded_file)
                 if not result_path.is_file():
                     mp4_alt = result_path.with_suffix(".mp4")
                     if mp4_alt.is_file():
-                        return mp4_alt
-                    mkv_alt = result_path.with_suffix(".mkv")
-                    if mkv_alt.is_file():
-                        return mkv_alt
+                        result_path = mp4_alt
+                    else:
+                        mkv_alt = result_path.with_suffix(".mkv")
+                        if mkv_alt.is_file():
+                            result_path = mkv_alt
+                if not result_path.is_file():
+                    raise DownloadException(f"文件大小超出限制（上限 {limit} 字节）")
+                if result_path.stat().st_size > limit:
+                    result_path.unlink(missing_ok=True)
+                    raise DownloadException(f"文件大小超出限制（上限 {limit} 字节）")
                 return result_path
 
         return await asyncio.to_thread(_sync_ytdlp_run)

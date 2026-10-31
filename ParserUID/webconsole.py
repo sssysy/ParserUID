@@ -19,7 +19,12 @@ from gsuid_core.webconsole.plugin_page import (
     register_plugin_page,
 )
 
-from .config import proxy_url, parser_config, default_skin_pack
+from .config import (
+    proxy_url,
+    parser_config,
+    save_skin_pack,
+    default_skin_pack,
+)
 from .parsers.config import (
     ParserManifest,
     ParserFieldValue,
@@ -410,8 +415,10 @@ async def save_skin(req: SaveSkinRequest) -> object:
     if req.name not in valid_names:
         return api_fail(f"不支持的皮肤：{req.name}", status=400)
 
-    updated = await asyncio.to_thread(parser_config.set_config, "default_skin_pack", req.name)
-    if not updated:
+    try:
+        await save_skin_pack(req.name)
+    except OSError as exc:
+        logger.warning(f"[Parser·Web] 皮肤设置保存失败 | error_type={type(exc).__name__}")
         return api_fail("皮肤设置保存失败", status=500)
 
     return api_ok({"current": req.name})

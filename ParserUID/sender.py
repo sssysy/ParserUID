@@ -12,14 +12,18 @@ from gsuid_core.bot import Bot
 from gsuid_core.logger import logger
 from gsuid_core.models import Event, Message
 from gsuid_core.segment import MessageSegment
+from gsuid_core.utils.plugins_config.gs_config import sp_config
 
 from .config import (
     parser_config,
-    session_key_of,
     default_skin_pack,
-    is_node_enabled_for,
+    max_file_size_bytes,
+    max_audio_duration_seconds,
+    max_video_duration_seconds,
 )
+from .utils.ffmpeg import probe_duration
 from .render.models import PreviewCard
+from .utils.exceptions import ResourceLimitException, sanitize_error_text
 
 _CURRENT_SEND_PROXY: ContextVar[str | None] = ContextVar("parser_uid_send_proxy", default=None)
 
@@ -60,6 +64,9 @@ class MediaContentProtocol(ContentProtocol, Protocol):
     def kind(self) -> MediaKind: ...
 
     async def path(self) -> Path: ...
+
+    @property
+    def duration(self) -> float: ...
 
 
 @runtime_checkable
@@ -141,7 +148,6 @@ async def send_parse_result(
     summary: ResultSummary | None = None,
     forward_threshold: int = DEFAULT_FORWARD_THRESHOLD,
     supports_node: bool = True,
-    show_failure_tip: bool = True,
 ) -> bool:
     """按输入顺序发送解析结果；返回是否已交给 Core 发送队列。"""
     _validate_contents(contents)
@@ -157,14 +163,14 @@ async def send_parse_result(
         fallback = build_text_fallback(summary, len(contents))
         return await _send(bot, MessageSegment.text(fallback))
 
-    segments = await _build_segments(contents, show_failure_tip)
+    segments = await _build_segments(contents)
     if not segments:
         logger.warning("[Parser·发送] 没有可发送的内容")
         return False
 
     if should_merge:
         logger.info(f"[Parser·发送] 使用合并转发 | count={len(contents)}")
-        return await _send(bot, [MessageSegment.node([segment]) for segment in segments])
+        return await _send(bot, [MessageSegment.node(segments)])
 
     return await _send(bot, segments)
 
@@ -184,7 +190,6 @@ def _validate_contents(contents: Sequence[ContentItem]) -> None:
 
 async def _build_segments(
     contents: Sequence[ContentItem],
-    show_failure_tip: bool,
 ) -> list[Message]:
     segments: list[Message] = []
     for item in contents:
@@ -199,7 +204,7 @@ async def _build_segments(
 
         if not isinstance(item, MediaContentProtocol):
             raise TypeError("媒体内容必须提供 path()")
-        segment = await _build_media_segment(item, kind, show_failure_tip)
+        segment = await _build_media_segment(item, kind)
         if segment is not None:
             segments.append(segment)
     return segments
@@ -208,20 +213,37 @@ async def _build_segments(
 async def _build_media_segment(
     item: MediaContentProtocol,
     kind: MediaKind,
-    show_failure_tip: bool,
-) -> Message | None:
+) -> Message:
     # 单项下载失败不能阻断后续内容，边界内只记录异常类型。
     try:
         path = await item.path()
+        await _validate_media_limits(path, item.duration, kind)
         if kind == "image":
             return await asyncio.to_thread(MessageSegment.image, path)
         file_name = item.name if isinstance(item, NamedMediaProtocol) and item.name else None
         return await asyncio.to_thread(_media_segment, path, kind, file_name)
     except Exception as exc:
+        error_text = sanitize_error_text(str(exc))
         logger.warning(f"[Parser·发送] {MEDIA_LABELS[kind]}内容不可用 | error_type={type(exc).__name__}")
-        if show_failure_tip:
-            return MessageSegment.text(f"{MEDIA_LABELS[kind]}获取失败，已跳过")
-        return None
+        return MessageSegment.text(f"{MEDIA_LABELS[kind]}获取失败，已跳过：{error_text}")
+
+
+async def _validate_media_limits(path: Path, duration: float, kind: MediaKind) -> None:
+    size = path.stat().st_size if path.is_file() else 0
+    max_bytes = max_file_size_bytes()
+    if size > max_bytes:
+        raise ResourceLimitException(f"文件大小超出限制（上限 {max_bytes // 1024 // 1024} MB）")
+    if kind not in {"video", "audio"}:
+        return
+    limit = max_video_duration_seconds() if kind == "video" else max_audio_duration_seconds()
+    actual = duration if duration > 0 else 0.0
+    if actual <= 0:
+        probed = await probe_duration(path)
+        actual = probed if probed is not None and probed > 0 else 0.0
+    if actual <= 0:
+        return
+    if actual > limit:
+        raise ResourceLimitException(f"{MEDIA_LABELS[kind]}时长超出限制（上限 {int(limit // 60)} 分钟）")
 
 
 def _media_segment(path: Path, kind: MediaKind, file_name: str | None = None) -> Message:
@@ -263,8 +285,7 @@ async def send_result_for_event(
         contents,
         summary=summary,
         forward_threshold=max(0, int(parser_config.get_config("node_threshold").data)),
-        supports_node=is_node_enabled_for(session_key_of(ev)),
-        show_failure_tip=bool(parser_config.get_config("show_download_failure").data),
+        supports_node=str(sp_config.get_config("EnableForwardMessage").data) in {"允许", "合并为一条消息"},
     )
 
 

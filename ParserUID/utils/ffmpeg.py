@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 import shutil
 import asyncio
@@ -76,6 +77,45 @@ async def exec_ffmpeg_cmd(
         await proc.wait()
         raise TimeoutError(f"FFmpeg 执行超时：{timeout}s") from exc
     return proc.returncode or 0, stdout, stderr
+
+
+async def probe_duration(path: Path) -> float | None:
+    """用 ffprobe 读取媒体时长；未安装 ffprobe 时返回未知。"""
+    ffprobe = get_ffprobe_path()
+    if ffprobe is None:
+        return None
+    proc = await asyncio.create_subprocess_exec(
+        ffprobe,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        str(path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+    if proc.returncode != 0:
+        return None
+    try:
+        raw: object = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    format_info = raw.get("format")
+    if not isinstance(format_info, dict):
+        return None
+    duration = format_info.get("duration")
+    if isinstance(duration, (int, float, str)):
+        try:
+            value = float(duration)
+        except ValueError:
+            return None
+        return value if value >= 0 else None
+    return None
 
 
 async def merge_av(

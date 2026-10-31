@@ -85,6 +85,11 @@ class MediaContent:
         """兼容原解析器代码习惯的方法别名。"""
         return await self.path()
 
+    @property
+    def duration(self) -> float:
+        """返回媒体时长；未知时为 0。"""
+        return 0.0
+
 
 class ImageContent(MediaContent):
     """图片媒体内容项。"""
@@ -106,11 +111,15 @@ class VideoContent(MediaContent):
     ) -> None:
         super().__init__(path, loader)
         self.cover = cover
-        self.duration = duration
         self.fallback_urls: list[str] = []
+        self._duration = duration
 
     def kind(self) -> Literal["video"]:
         return "video"
+
+    @property
+    def duration(self) -> float:
+        return self._duration
 
     async def get_cover_path(self) -> Path | None:
         return self.cover
@@ -127,10 +136,14 @@ class AudioContent(MediaContent):
         duration: float = 0.0,
     ) -> None:
         super().__init__(path, loader)
-        self.duration = duration
+        self._duration = duration
 
     def kind(self) -> Literal["audio"]:
         return "audio"
+
+    @property
+    def duration(self) -> float:
+        return self._duration
 
 
 class FileContent(MediaContent):
@@ -166,11 +179,15 @@ class LivePhotoContent(MediaContent):
         super().__init__(path, loader)
         self.image_path = image_path
         self.cover = cover
-        self.duration = duration
+        self._duration = duration
         self.loop = loop
 
     def kind(self) -> Literal["video"]:
         return "video"
+
+    @property
+    def duration(self) -> float:
+        return self._duration
 
     async def get_image_path(self) -> Path | None:
         return self.image_path
@@ -189,8 +206,8 @@ class DynamicContent(MediaContent):
         super().__init__(path, loader)
         self.gif_path = gif_path
 
-    def kind(self) -> Literal["image"]:
-        return "image"
+    def kind(self) -> Literal["video"]:
+        return "video"
 
 
 @dataclass(slots=True)

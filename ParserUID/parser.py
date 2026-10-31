@@ -20,9 +20,6 @@ from gsuid_core.server import on_core_start, on_core_shutdown
 
 from .config import (
     parser_config,
-    session_key_of,
-    is_session_enabled,
-    set_session_enabled,
 )
 from .utils.exceptions import ParseException, format_user_error, sanitize_error_text
 
@@ -102,36 +99,6 @@ class _ExpiringClaims:
             if claimed_at < expires_before:
                 del self.claims[key]
         self.last_purge = now
-
-
-@dataclass
-class _CapacityGate:
-    limit: int = 1
-    active: int = 0
-    closed: bool = False
-    changed: asyncio.Condition = field(default_factory=asyncio.Condition)
-
-    async def set_limit(self, limit: int) -> None:
-        async with self.changed:
-            self.limit = max(1, limit)
-            self.changed.notify_all()
-
-    async def acquire(self) -> None:
-        async with self.changed:
-            await self.changed.wait_for(lambda: self.active < self.limit or self.closed)
-            if self.closed:
-                raise asyncio.CancelledError
-            self.active += 1
-
-    async def release(self) -> None:
-        async with self.changed:
-            self.active -= 1
-            self.changed.notify()
-
-    async def close(self) -> None:
-        async with self.changed:
-            self.closed = True
-            self.changed.notify_all()
 
 
 def _trim_url(candidate: str) -> str:
@@ -292,7 +259,7 @@ async def _default_send_result(
 
 
 class ParserRuntime:
-    """解析任务去重、并发、超时与生命周期管理。"""
+    """解析任务去重、超时与生命周期管理。"""
 
     def __init__(
         self,
@@ -310,13 +277,12 @@ class ParserRuntime:
         self._link_claims: _ExpiringClaims | None = None
         self._debounce_seconds: float | None = None
         self._timeout: float | None = None
-        self._gate = _CapacityGate()
         self._tasks: set[asyncio.Task[None]] = set()
         self._closed = False
 
     async def dispatch(self, bot: Bot, ev: Event) -> bool:
         """匹配首个解析器并在后台启动任务。"""
-        if self._closed or not is_session_enabled(ev):
+        if self._closed:
             return False
         await self._sync_limits()
         include_reply = bool(parser_config.get_config("parse_replies").data)
@@ -349,8 +315,6 @@ class ParserRuntime:
         return True
 
     async def _sync_limits(self) -> None:
-        concurrent = int(parser_config.get_config("max_concurrent_parses").data)
-        await self._gate.set_limit(min(32, max(1, concurrent)))
         timeout = int(parser_config.get_config("task_timeout_seconds").data)
         self._timeout = float(max(1, timeout))
         debounce = float(max(0, int(parser_config.get_config("debounce_seconds").data)))
@@ -359,12 +323,9 @@ class ParserRuntime:
             self._link_claims = _ExpiringClaims(debounce)
 
     async def _run_selected(self, bot: Bot, ev: Event, matched: ParserMatch) -> None:
-        acquired = False
         started_at = self._clock()
         try:
             async with asyncio.timeout(_require_timeout(self._timeout)):
-                await self._gate.acquire()
-                acquired = True
                 await self._parse_and_send(bot, ev, matched)
         except TimeoutError:
             elapsed = self._clock() - started_at
@@ -392,9 +353,6 @@ class ParserRuntime:
                 f"error_type={type(exc).__name__} | elapsed={elapsed:.1f}s | error={error_text}",
             )
             await self._notify_error(bot, format_user_error(exc))
-        finally:
-            if acquired:
-                await self._gate.release()
 
     async def _parse_and_send(self, bot: Bot, ev: Event, matched: ParserMatch) -> None:
         async def desc_sink(description: Description) -> None:
@@ -408,8 +366,6 @@ class ParserRuntime:
         await self._send_result(bot, ev, result)
 
     async def _notify_error(self, bot: Bot, message: str) -> None:
-        if not bool(parser_config.get_config("show_download_failure").data):
-            return
         try:
             await bot.send(message)
         except Exception as exc:
@@ -434,7 +390,6 @@ class ParserRuntime:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        await self._gate.close()
         await self.registry.close()
 
 
@@ -486,16 +441,6 @@ async def close_runtime() -> None:
         _runtime = None
     if runtime is not None:
         await runtime.close()
-
-
-async def enable_session(ev: Event) -> None:
-    """开启当前会话的自动解析。"""
-    await set_session_enabled(session_key_of(ev), True)
-
-
-async def disable_session(ev: Event) -> None:
-    """关闭当前会话的自动解析。"""
-    await set_session_enabled(session_key_of(ev), False)
 
 
 sv = SV("ParserUID 自动解析", pm=6, area="ALL")
