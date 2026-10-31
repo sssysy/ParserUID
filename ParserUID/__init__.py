@@ -2,7 +2,7 @@ from gsuid_core.sv import Plugins
 
 Plugins(
     name="ParserUID",
-    prefix=["psr"],
+    force_prefix=["psr"],
     allow_empty_prefix=False,
 )
 
