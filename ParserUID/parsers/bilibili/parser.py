@@ -150,8 +150,8 @@ class BilibiliParser(BaseParser):
 
     @property
     def quality(self) -> int:
-        value = str(getattr(self.mycfg, "video_quality", "auto") or "auto")
-        return QUALITY_MAP.get(value.lower(), 127)
+        value = self.get_config_value("video_quality", "auto").strip().lower()
+        return QUALITY_MAP.get(value, 127)
 
     def _set_cookies(self) -> None:
         cookies_str = self.get_config_value("cookies")
@@ -529,7 +529,7 @@ class BilibiliParser(BaseParser):
             videos = self._normalize_streams(raw_videos, kind="video")
             audios = self._normalize_streams(raw_audios, kind="audio")
             if videos:
-                selected = videos[0]
+                selected = self._select_video_stream(videos)
                 return StreamSelection(
                     video=_string_list(selected["urls"]),
                     audio=[_string_list(item["urls"]) for item in audios],
@@ -630,6 +630,19 @@ class BilibiliParser(BaseParser):
             result.sort(key=lambda item: item["quality_id"], reverse=True)
         return result
 
+    def _select_video_stream(self, videos: list[StreamCandidate]) -> StreamCandidate:
+        """按配置选择画质；auto 取最高，指定画质优先精确匹配且不超出偏好。"""
+        preference = self.get_config_value("video_quality", "auto").strip().lower()
+        if preference == "auto" or preference not in QUALITY_MAP:
+            return videos[0]
+
+        target = QUALITY_MAP[preference]
+        for candidate in videos:
+            if candidate["quality_id"] == target:
+                return candidate
+        within_preference = [candidate for candidate in videos if candidate["quality_id"] <= target]
+        return within_preference[0] if within_preference else videos[-1]
+
     @staticmethod
     def _stream_int(value: object) -> int:
         try:
@@ -714,7 +727,9 @@ class BilibiliParser(BaseParser):
                                 )
                             except (ParseException, OSError) as exc:
                                 last_error = exc
-                raise ParseException("视频音轨下载或合并失败") from last_error
+                if isinstance(last_error, ParseException):
+                    raise last_error
+                raise ParseException(str(last_error or "视频音轨下载或合并失败")) from last_error
             last_error: ParseException | OSError | None = None
             for video_url in videos:
                 try:
@@ -726,7 +741,9 @@ class BilibiliParser(BaseParser):
                     )
                 except (ParseException, OSError) as exc:
                     last_error = exc
-            raise ParseException("视频流下载失败") from last_error
+            if isinstance(last_error, ParseException):
+                raise last_error
+            raise ParseException(str(last_error or "视频流下载失败")) from last_error
 
         return self.create_video_content(
             None,

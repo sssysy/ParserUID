@@ -32,7 +32,7 @@ CONFIG_DEFAULT: dict[str, GSC] = {
     ),
     "onebot_emoji_reaction": GsBoolConfig(
         title="对 OneBotUID 触发解析时启用贴表情",
-        desc="仅在通过 OneBotUID 连接至 GsCore 时生效；解析命中后对触发消息贴睁眼表情，未安装 OneBotUID 时自动跳过。",
+        desc="仅在通过 [OneBotUID](https://github.com/xiowo/OneBotUID) 连接至 GsCore 时生效；解析命中后对触发消息贴睁眼表情，未安装 OneBotUID 时自动跳过。",
         data=False,
     ),
     "send_render_preview": GsBoolConfig(

@@ -163,16 +163,23 @@ async def send_parse_result(
         fallback = build_text_fallback(summary, len(contents))
         return await _send(bot, MessageSegment.text(fallback))
 
-    segments = await _build_segments(contents)
-    if not segments:
+    segments, failures = await _build_segments(contents)
+    if not segments and not failures:
         logger.warning("[Parser·发送] 没有可发送的内容")
         return False
 
-    if should_merge:
+    sent = False
+    if should_merge and segments:
         logger.info(f"[Parser·发送] 使用合并转发 | count={len(contents)}")
-        return await _send(bot, [MessageSegment.node(segments)])
+        sent = await _send(bot, [MessageSegment.node(segments)])
+    elif segments:
+        sent = await _send(bot, segments)
 
-    return await _send(bot, segments)
+    if failures:
+        # 失败提示独立发送，避免被合并转发适配器吞掉或延迟展示。
+        failure_sent = await _send(bot, MessageSegment.text("\n".join(failures)))
+        sent = failure_sent or sent
+    return sent
 
 
 def _validate_contents(contents: Sequence[ContentItem]) -> None:
@@ -190,8 +197,9 @@ def _validate_contents(contents: Sequence[ContentItem]) -> None:
 
 async def _build_segments(
     contents: Sequence[ContentItem],
-) -> list[Message]:
+) -> tuple[list[Message], list[str]]:
     segments: list[Message] = []
+    failures: list[str] = []
     for item in contents:
         kind = item.kind()
         if kind == "text":
@@ -204,28 +212,36 @@ async def _build_segments(
 
         if not isinstance(item, MediaContentProtocol):
             raise TypeError("媒体内容必须提供 path()")
-        segment = await _build_media_segment(item, kind)
-        if segment is not None:
-            segments.append(segment)
-    return segments
+        built = await _build_media_segment(item, kind)
+        if built.segment is not None:
+            segments.append(built.segment)
+        if built.failure is not None:
+            failures.append(built.failure)
+    return segments, failures
+
+
+@dataclass(frozen=True, slots=True)
+class _BuiltMediaSegment:
+    segment: Message | None = None
+    failure: str | None = None
 
 
 async def _build_media_segment(
     item: MediaContentProtocol,
     kind: MediaKind,
-) -> Message:
+) -> _BuiltMediaSegment:
     # 单项下载失败不能阻断后续内容，边界内只记录异常类型。
     try:
         path = await item.path()
         await _validate_media_limits(path, item.duration, kind)
         if kind == "image":
-            return await asyncio.to_thread(MessageSegment.image, path)
+            return _BuiltMediaSegment(segment=await asyncio.to_thread(MessageSegment.image, path))
         file_name = item.name if isinstance(item, NamedMediaProtocol) and item.name else None
-        return await asyncio.to_thread(_media_segment, path, kind, file_name)
+        return _BuiltMediaSegment(segment=await asyncio.to_thread(_media_segment, path, kind, file_name))
     except Exception as exc:
         error_text = sanitize_error_text(str(exc))
         logger.warning(f"[Parser·发送] {MEDIA_LABELS[kind]}内容不可用 | error_type={type(exc).__name__}")
-        return MessageSegment.text(f"{MEDIA_LABELS[kind]}获取失败，已跳过：{error_text}")
+        return _BuiltMediaSegment(failure=f"{MEDIA_LABELS[kind]}获取失败，已跳过：{error_text}")
 
 
 async def _validate_media_limits(path: Path, duration: float, kind: MediaKind) -> None:
