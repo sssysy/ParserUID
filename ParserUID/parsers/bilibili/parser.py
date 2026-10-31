@@ -927,7 +927,6 @@ class BilibiliParser(BaseParser):
             clean_cover(dynamic.author.face),
             description=dynamic.author.sign or None,
             uid=dynamic.author.mid or None,
-            headers=self.media_headers,
         )
         await self.send_info(
             card_type="common",
