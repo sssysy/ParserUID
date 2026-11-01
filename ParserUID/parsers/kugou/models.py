@@ -55,19 +55,19 @@ class KugouPlayInfo(Struct):
     errcode: int = -1
     url: str = ""
     error: str = ""
-    songName: str = "未知歌曲"
-    singerName: str = "未知歌手"
+    songName: str = ""
+    singerName: str = ""
     author_name: str = ""
-    timeLength: float = 0.0
+    timeLength: float | int | str = 0.0
     hash: str = ""
-    album_audio_id: int = 0
-    albumid: int = 0
-    req_albumid: int = 0
+    album_audio_id: int | str = 0
+    albumid: int | str = 0
+    req_albumid: int | str = 0
     album_img: str = ""
-    bitRate: int = 0
+    bitRate: int | str = 0
     fileName: str = ""
     privilege: int = 0
-    extra: Raw | None = None
+    extra: Raw = Raw(b"null")
 
     def __post_init__(self) -> None:
         self.songName = decode_escaped_text(self.songName)
@@ -209,6 +209,21 @@ class KugouShareHashResponse(Struct):
     song_info: KugouShareHashInfo = field(default_factory=KugouShareHashInfo)
 
 
+class LyricCandidate(Struct):
+    id: str = ""
+    accesskey: str = ""
+
+
+class LyricSearchResponse(Struct):
+    candidates: list[LyricCandidate] = []
+
+
+class LyricDownloadResponse(Struct):
+    error_code: int = 0
+    content: str = ""
+    charset: str = "utf-8"
+
+
 @dataclass(frozen=True, slots=True)
 class SongIdentity:
     hash: str
@@ -302,18 +317,3 @@ def _quality_rank(quality: str) -> int:
         return order.index(quality)
     except ValueError:
         return -1
-
-
-class LyricCandidate(Struct):
-    id: str = ""
-    accesskey: str = ""
-
-
-class LyricSearchResponse(Struct):
-    candidates: list[LyricCandidate] = []
-
-
-class LyricDownloadResponse(Struct):
-    error_code: int = 0
-    content: str = ""
-    charset: str = "utf-8"

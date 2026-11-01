@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 import msgspec
 
 from .models import (
@@ -15,6 +16,8 @@ from .request import NeteaseClient
 from ...render.models import Author, Metric
 from ...utils.exceptions import ParseException
 
+_artist_avatar_cache: dict[int, str] = {}
+
 
 class ParsedSong:
     """发送层使用的稳定歌曲信息。"""
@@ -24,6 +27,7 @@ class ParsedSong:
         detail: SongDetail,
         privilege: SongPrivilege | None,
         quality: QualityDetail | None,
+        avatar_url: str | None = None,
     ) -> None:
         self.id = str(detail.id)
         self.title = detail.name.strip() or "未知歌曲"
@@ -38,7 +42,11 @@ class ParsedSong:
         self.alia = tuple(alias for alias in detail.alia if alias.strip())
         self.privilege = privilege
         self.quality = quality
-        self.author = Author(name=" / ".join(artist.name for artist in self.artists) or "未知歌手")
+        resolved_avatar = avatar_url or self.cover_url
+        self.author = Author(
+            name=" / ".join(artist.name for artist in self.artists) or "未知歌手",
+            avatar_url=resolved_avatar,
+        )
         self.metrics = (
             Metric(label="时长", value=self.duration_text),
             *((Metric(label="专辑", value=self.album),) if self.album else ()),
@@ -64,9 +72,35 @@ async def fetch_song(client: NeteaseClient, song_id: str) -> ParsedSong:
     if response.code != 200 or not response.songs:
         raise ParseException("网易云歌曲详情为空")
     detail = response.songs[0]
+    primary_artist_id = detail.ar[0].id if detail.ar else 0
+    avatar_url = await fetch_artist_avatar(client, primary_artist_id)
     quality = await fetch_quality_detail(client, song_id)
     privilege = response.privileges[0] if response.privileges else None
-    return ParsedSong(detail, privilege, quality)
+    return ParsedSong(detail, privilege, quality, avatar_url=avatar_url)
+
+
+async def fetch_artist_avatar(client: NeteaseClient, artist_id: int) -> str | None:
+    if artist_id <= 0:
+        return None
+    if artist_id in _artist_avatar_cache:
+        return _artist_avatar_cache[artist_id]
+    try:
+        raw = await client.weapi("/api/artist/head/info/get", {"id": artist_id})
+    except (ParseException, httpx.HTTPError):
+        return None
+    data = raw.get("data")
+    if not isinstance(data, dict):
+        return None
+    artist = data.get("artist")
+    if not isinstance(artist, dict):
+        return None
+    avatar = artist.get("avatar") or artist.get("cover")
+    if isinstance(avatar, str) and avatar:
+        if len(_artist_avatar_cache) > 200:
+            _artist_avatar_cache.clear()
+        _artist_avatar_cache[artist_id] = avatar
+        return avatar
+    return None
 
 
 async def fetch_quality_detail(client: NeteaseClient, song_id: str) -> QualityDetail | None:

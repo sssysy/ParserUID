@@ -233,37 +233,6 @@ def msgspec_privilege(
     return goods, _trans_param(resource.get("trans_param"))
 
 
-async def _authorization(
-    client: httpx.AsyncClient,
-    request: KugouRequest,
-    identity: SongIdentity,
-) -> tuple[str, int]:
-    payload = await request_json(
-        client,
-        request,
-        path="/v1/authorization",
-        router="trackercdngz.kugou.com",
-        params={
-            "authorization": "",
-            "module_id": 51,
-            "album_audio_id": identity.album_audio_id,
-            "clientver": 11561,
-            "hash": identity.hash.lower(),
-        },
-    )
-    if payload_int(payload, "status", -1) != 1:
-        raise ParseException(payload_str(payload, "error") or "酷狗歌曲授权失败")
-    data = payload.get("data")
-    data_map = _raw_mapping(data)
-    if data_map is None:
-        raise ParseException("酷狗歌曲授权响应结构无效")
-    auth = _as_str(data_map.get("auth"))
-    open_time = _as_int(data_map.get("open_time"))
-    if not auth and not open_time:
-        raise ParseException("酷狗未返回可用授权")
-    return auth, open_time
-
-
 async def fetch_vip_status(
     client: httpx.AsyncClient,
     request: KugouRequest,
@@ -301,57 +270,17 @@ async def resolve_audio(
     identity: SongIdentity,
     option: QualityOption,
 ) -> ResolvedAudio:
-    if request.profile.is_lite:
-        auth, open_time = await _authorization(client, request, identity)
-        if open_time <= 0:
-            open_time = int(time.time())
-        payload = await request_json(
-            client,
-            request,
-            path="/tracker/v5/url",
-            router="trackcdngz.kugou.com",
-            params={
+    hashes_to_try = [option.hash.lower()]
+    if identity.hash and identity.hash.lower() not in hashes_to_try:
+        hashes_to_try.append(identity.hash.lower())
+
+    last_error = ""
+    for target_hash in hashes_to_try:
+        for free_part in (0, 1):
+            params = {
                 "album_id": identity.album_id,
                 "area_code": 1,
-                "module": "",
-                "hash": option.hash.lower(),
-                "need_m": 0,
-                "ssa_flag": "is_fromtrack",
-                "version": 11430,
-                "open_time": open_time,
-                "ptype": 0,
-                "need_ogg": 1,
-                "page_id": request.profile.page_id,
-                "auth": auth,
-                "mtype": 0,
-                "quality": option.quality,
-                "album_audio_id": identity.album_audio_id,
-                "behavior": "play",
-                "pid": request.profile.pid,
-                "module_id": 51,
-                "cmd": 26,
-                "ppage_id": request.profile.ppage_id,
-                "clientver": 11561,
-                "pidversion": 3001,
-                "cdnBackup": 1,
-                "key": sign_key(
-                    request.profile,
-                    option.hash,
-                    request.credential.mid,
-                    request.credential.userid,
-                ),
-            },
-        )
-    else:
-        payload = await request_json(
-            client,
-            request,
-            path="/v5/url",
-            router="trackercdn.kugou.com",
-            params={
-                "album_id": identity.album_id,
-                "area_code": 1,
-                "hash": option.hash.lower(),
+                "hash": target_hash,
                 "ssa_flag": "is_fromtrack",
                 "version": 11430,
                 "page_id": request.profile.page_id,
@@ -361,44 +290,56 @@ async def resolve_audio(
                 "pid": request.profile.pid,
                 "cmd": 26,
                 "pidversion": 3001,
-                "IsFreePart": 0,
+                "IsFreePart": free_part,
                 "ppage_id": request.profile.ppage_id,
                 "cdnBackup": 1,
                 "module": "",
                 "clientver": 11430,
                 "key": sign_key(
                     request.profile,
-                    option.hash,
+                    target_hash,
                     request.credential.mid,
                     request.credential.userid,
                 ),
-            },
-        )
-    if payload_int(payload, "status", -1) != 1:
-        raise ParseException(payload_str(payload, "error") or "酷狗未返回音频地址")
-    urls = payload.get("url")
-    if not isinstance(urls, list):
-        raise ParseException("酷狗音频地址响应无效")
-    usable = [item for item in urls if isinstance(item, str) and item.startswith(("http://", "https://"))]
-    if not usable:
-        raise ParseException("酷狗未返回有效音频地址")
-    backups = payload.get("backup_url")
-    backup_urls = (
-        tuple(
-            item
-            for item in backups
-            if isinstance(item, str) and item.startswith(("http://", "https://")) and item not in usable
-        )
-        if isinstance(backups, list)
-        else ()
-    )
-    extension = option.extension or _extension_from_url(usable[0]) or "mp3"
-    return ResolvedAudio(
-        url=usable[0],
-        backup_urls=backup_urls,
-        quality=option,
-        extension=extension,
-    )
+            }
+            try:
+                payload = await request_json(
+                    client,
+                    request,
+                    path="/v5/url",
+                    router="trackercdn.kugou.com",
+                    params=params,
+                )
+            except ParseException as exc:
+                last_error = str(exc)
+                continue
+            if payload_int(payload, "status", -1) != 1:
+                last_error = payload_str(payload, "error") or "当前音质受限"
+                continue
+            urls = payload.get("url")
+            if not isinstance(urls, list):
+                continue
+            usable = [item for item in urls if isinstance(item, str) and item.startswith(("http://", "https://"))]
+            if not usable:
+                continue
+            backups = payload.get("backup_url")
+            backup_urls = (
+                tuple(
+                    item
+                    for item in backups
+                    if isinstance(item, str) and item.startswith(("http://", "https://")) and item not in usable
+                )
+                if isinstance(backups, list)
+                else ()
+            )
+            extension = option.extension or _extension_from_url(usable[0]) or "mp3"
+            return ResolvedAudio(
+                url=usable[0],
+                backup_urls=backup_urls,
+                quality=option,
+                extension=extension,
+            )
+    raise ParseException(last_error or "酷狗未返回有效音频地址")
 
 
 async def try_claim_vip(
@@ -413,14 +354,14 @@ async def try_claim_vip(
         return VipAttempt(ran=False, success=True, message="已有会员")
     messages: list[str] = []
     success = False
-    for receive_day in _candidate_receive_days(receive_day):
+    for day in _candidate_receive_days(receive_day):
         try:
             payload = await request_json(
                 client,
                 request,
                 path="/youth/v1/recharge/receive_vip_listen_song",
                 method="POST",
-                params={"source_id": 90139, "receive_day": receive_day},
+                params={"source_id": 90139, "receive_day": day},
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
         except ParseException as exc:

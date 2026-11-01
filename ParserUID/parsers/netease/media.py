@@ -90,7 +90,9 @@ def _player_payload(song_id: str, level: QualityLevel) -> dict[str, object]:
 
 
 def _validate_item(item: SongUrlItem, requested: QualityLevel, source: str) -> ResolvedAudio | None:
-    if item.code != 200 or not item.url.startswith(("http://", "https://")):
+    if item.code != 200 or not item.url or not item.url.startswith(("http://", "https://")):
+        return None
+    if item.level is None:
         return None
     actual = normalize_level(item.level)
     if actual is None:
@@ -104,7 +106,7 @@ def _validate_item(item: SongUrlItem, requested: QualityLevel, source: str) -> R
             trial_seconds = max(0, item.freeTrialInfo.end)
         if trial_seconds > 0:
             return None
-    extension = item.type.lower()
+    extension = item.type.lower() if item.type else ""
     if extension not in AUDIO_EXTENSIONS:
         extension = "flac" if actual in ("lossless", "hires", "jymaster", "jyeffect") else "mp3"
     return ResolvedAudio(
@@ -119,17 +121,19 @@ def _validate_item(item: SongUrlItem, requested: QualityLevel, source: str) -> R
 
 def _trial_item(item: SongUrlItem, source: str) -> ResolvedAudio | None:
     """仅在没有任何完整音源时返回试听，调用方需在卡片上标明。"""
-    if item.code != 200 or not item.url.startswith(("http://", "https://")):
+    if item.code != 200 or not item.url or not item.url.startswith(("http://", "https://")):
+        return None
+    if item.level is None or item.freeTrialInfo is None:
         return None
     actual = normalize_level(item.level)
-    if actual is None or item.freeTrialInfo is None:
+    if actual is None:
         return None
     seconds = max(0, item.freeTrialInfo.end - item.freeTrialInfo.start)
     if seconds <= 0:
         seconds = max(0, item.freeTrialInfo.end)
     if seconds <= 0:
         return None
-    extension = item.type.lower()
+    extension = item.type.lower() if item.type else ""
     if extension not in AUDIO_EXTENSIONS:
         extension = "mp3"
     return ResolvedAudio(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 from collections.abc import Mapping
 
 import httpx
@@ -20,7 +21,16 @@ SONG_INFO_URL = "https://m.kugou.com/app/i/getSongInfo.php"
 MOBILE_UA = (
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 )
-HASH_RE = re.compile(r"[0-9A-Fa-f]{32}")
+JSON_HASH_RE = re.compile(r'"hash"\s*:\s*"([0-9A-Fa-f]{32})"')
+SMARTY_RE = re.compile(r"var dataFromSmarty\s*=\s*(\[.*?\]),", re.DOTALL)
+
+
+def _to_int(val: int | str | None) -> int:
+    if isinstance(val, int) and type(val) is not bool:
+        return val
+    if isinstance(val, str) and val.isdigit():
+        return int(val)
+    return 0
 
 
 async def fetch_song_info(
@@ -63,8 +73,8 @@ def _extra_int(payload: Mapping[str, object] | None, key: str) -> int:
 def identity_from_play_info(info: KugouPlayInfo) -> SongIdentity:
     return SongIdentity(
         hash=(info.hash or "").lower(),
-        album_id=info.albumid or info.req_albumid,
-        album_audio_id=info.album_audio_id,
+        album_id=_to_int(info.albumid) or _to_int(info.req_albumid),
+        album_audio_id=_to_int(info.album_audio_id),
         audio_id=_extra_int(_raw_extra(info.extra), "audio_id"),
     )
 
@@ -92,11 +102,16 @@ def meta_from_play_info(info: KugouPlayInfo, *, hash_fallback: str = "") -> Song
     extra = _raw_extra(info.extra)
     if extra is not None:
         cover = _string(extra.get("union_cover")) or cover
+    duration = 0.0
+    if isinstance(info.timeLength, (int, float)) and type(info.timeLength) is not bool:
+        duration = float(info.timeLength)
+    elif isinstance(info.timeLength, str) and info.timeLength.replace(".", "", 1).isdigit():
+        duration = float(info.timeLength)
     return SongMeta(
         identity=identity,
         title=info.songName or info.fileName or "未知歌曲",
         singer=info.author_name or info.singerName or "未知歌手",
-        duration=max(0.0, float(info.timeLength)),
+        duration=max(0.0, duration),
         cover_url=cover.replace("{size}", "480") if cover else "",
         privilege=info.privilege,
     )
@@ -108,23 +123,44 @@ async def resolve_share_hash(
     *,
     chain: str = "",
 ) -> SongIdentity:
-    if chain:
-        target = f"https://m.kugou.com/share/song.html?chain={chain}"
-    else:
-        target = url
+    target = f"https://m.kugou.com/share/song.html?chain={chain}" if chain else url
     try:
         response = await client.get(
             target,
             headers={"User-Agent": MOBILE_UA, "Referer": "https://m.kugou.com/"},
+            follow_redirects=True,
         )
         response.raise_for_status()
     except httpx.HTTPError as exc:
         raise ParseException("酷狗分享页请求失败") from exc
+
+    from_query = identity_from_query(str(response.url))
+    if from_query.hash and not re.fullmatch(r"4?a{31,32}", from_query.hash, re.IGNORECASE):
+        return from_query
+
     text = response.text
-    matches = HASH_RE.findall(text)
-    if not matches:
-        raise ParseException("未找到酷狗歌曲 hash")
-    return SongIdentity(hash=matches[0].lower())
+    for match in JSON_HASH_RE.finditer(text):
+        h = match.group(1).lower()
+        if not re.fullmatch(r"4?a{31,32}", h, re.IGNORECASE):
+            return SongIdentity(hash=h)
+
+    smarty = SMARTY_RE.search(text)
+    if smarty:
+        try:
+            parsed = json.loads(smarty.group(1))
+            if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+                first = parsed[0]
+                val = first.get("hash")
+                if isinstance(val, str) and re.fullmatch(r"[0-9A-Fa-f]{32}", val):
+                    h = val.lower()
+                    if not re.fullmatch(r"4?a{31,32}", h, re.IGNORECASE):
+                        album_id = _to_int(first.get("album_id"))
+                        album_audio_id = _to_int(first.get("mixsongid") or first.get("album_audio_id"))
+                        return SongIdentity(hash=h, album_id=album_id, album_audio_id=album_audio_id)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    raise ParseException("未找到酷狗歌曲 hash")
 
 
 def identity_from_query(url: str) -> SongIdentity:
@@ -132,8 +168,8 @@ def identity_from_query(url: str) -> SongIdentity:
 
     query = parse_qs(urlsplit(url).query)
     song_hash = (query.get("hash") or [""])[0]
-    album_id = _int_value((query.get("album_id") or ["0"])[0])
-    album_audio_id = _int_value((query.get("album_audio_id") or ["0"])[0])
+    album_id = _to_int((query.get("album_id") or ["0"])[0])
+    album_audio_id = _to_int((query.get("album_audio_id") or ["0"])[0])
     return SongIdentity(hash=song_hash.lower(), album_id=album_id, album_audio_id=album_audio_id)
 
 
@@ -148,7 +184,7 @@ async def resolve_identity(
         album_id=identity.album_id,
         album_audio_id=identity.album_audio_id,
     )
-    if info.errcode != 0 and not info.songName:
+    if info.errcode != 0 and not info.songName and not info.fileName:
         raise ParseException("酷狗歌曲不存在或不可访问")
     meta = meta_from_play_info(info, hash_fallback=identity.hash)
     merged = SongIdentity(
@@ -162,7 +198,3 @@ async def resolve_identity(
 
 def _string(value: object) -> str:
     return value if isinstance(value, str) else ""
-
-
-def _int_value(value: str) -> int:
-    return int(value) if value.isdigit() else 0

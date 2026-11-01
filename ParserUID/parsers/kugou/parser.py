@@ -41,13 +41,16 @@ class KugouParser(BaseParser):
 
     @handle(
         "t1.kugou.com",
-        r"https?://t1\.kugou\.com/(?P<share_code>[A-Za-z0-9]+)",
+        r"https?://t1\.kugou\.com/(?:"
+        r"(?P<share_code>[A-Za-z0-9]+)"
+        r"|(?P<before_hash>[^\s]* hash=(?P<hash>[0-9A-Fa-f]{32}))"
+        r")",
     )
     async def _parse_short_link(self, searched: re.Match[str]) -> Sequence[ContentItem]:
-        code = searched.group("share_code")
-        client = await self.get_client()
-        identity = await resolve_share_hash(client, searched.group(0), chain=code)
-        return await self._parse_identity(identity)
+        song_hash = searched.groupdict().get("hash")
+        if song_hash:
+            return await self._parse_identity(SongIdentity(hash=song_hash.lower()))
+        return await self.parse_with_redirect(searched.group(0))
 
     @handle(
         "kugou.com",
@@ -138,7 +141,7 @@ class KugouParser(BaseParser):
         stored = load_credential("lite" if profile.is_lite else "standard")
         if stored is not None:
             return stored
-        raise ParseException(f"未配置酷狗{profile.display_name} Cookie")
+        return credential_from_cookie("", mode="manual")
 
     def _select_fallback(self, privilege: object) -> QualityOption | None:
         if not isinstance(privilege, PrivilegeResult):

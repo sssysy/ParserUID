@@ -108,13 +108,13 @@ class TrialInfo(Struct, frozen=True, omit_defaults=True):
 
 class SongUrlItem(Struct, frozen=True, omit_defaults=True):
     id: int = 0
-    url: str = ""
+    url: str | None = None
     br: int = 0
     size: int = 0
     code: int = 0
-    type: str = ""
-    level: str = ""
-    encodeType: str = ""
+    type: str | None = None
+    level: str | None = None
+    encodeType: str | None = None
     freeTrialInfo: TrialInfo | None = None
 
 
