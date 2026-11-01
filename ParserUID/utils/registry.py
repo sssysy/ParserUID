@@ -121,6 +121,14 @@ def _install_parseruid_namespace_alias() -> None:
             sys.modules[alias] = module
 
 
+def _clear_thirdparty_module_cache(module_name: str) -> None:
+    """热重载时清除第三方包旧模块，避免继续继承上一代 BaseParser。"""
+    prefix = f"{module_name}."
+    for loaded_name in tuple(sys.modules):
+        if loaded_name == module_name or loaded_name.startswith(prefix):
+            sys.modules.pop(loaded_name, None)
+
+
 def _import_parser_class(
     dir_path: Path,
     module_name: str,
@@ -131,6 +139,7 @@ def _import_parser_class(
 
     if module_name.startswith(THIRDPARTY_MODULE_PREFIX):
         _install_parseruid_namespace_alias()
+        _clear_thirdparty_module_cache(module_name)
 
     try:
         spec = importlib.util.spec_from_file_location(
