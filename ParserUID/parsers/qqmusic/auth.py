@@ -238,7 +238,8 @@ async def _authorize_qq(
             cookies=dict(check_response.cookies),
             follow_redirects=False,
         )
-        authorize_response.raise_for_status()
+        if authorize_response.status_code >= 400:
+            authorize_response.raise_for_status()
     except httpx.HTTPError as exc:
         logger.warning(f"[Parser·QQ音乐] 授权请求失败 | error_type={type(exc).__name__}")
         raise ParseException(_http_error_message("QQ音乐授权请求失败", exc)) from exc
@@ -264,7 +265,9 @@ async def _request_check_sig(
         cookies=cookies,
         follow_redirects=False,
     )
-    response.raise_for_status()
+    # check_sig 正常使用 302 下发 p_skey，不能把重定向当 HTTP 失败。
+    if response.status_code >= 400:
+        response.raise_for_status()
     return response
 
 
