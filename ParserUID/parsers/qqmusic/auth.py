@@ -19,7 +19,7 @@ from gsuid_core.data_store import get_res_path
 from .sign import hash33
 from .client import WEB_UA, QqMusicClient
 from .models import QqCredential, QqStoredCredential, QqStoredCredentialData
-from ...utils.exceptions import ParseException
+from ...utils.exceptions import ParseException, sanitize_error_text
 
 COOKIE_FILE: Final = get_res_path("ParserUID") / "cookies" / "qqmusic_credential.json"
 QQ_QR_URL: Final = "https://ssl.ptlogin2.qq.com/ptqrshow"
@@ -37,6 +37,7 @@ _QQ_UIN_RE = re.compile(r"(?:\?|&)uin=(.+?)&service")
 _WX_UUID_RE = re.compile(r'uuid=(.+?)"')
 _WX_STATUS_RE = re.compile(r"window\.wx_errcode=(\d+);window\.wx_code='([^']*)'")
 _LOGIN_HEADERS = {"Referer": "https://xui.ptlogin2.qq.com/", "User-Agent": WEB_UA}
+_refresh_lock = asyncio.Lock()
 
 
 class QrKind(str, Enum):
@@ -410,6 +411,33 @@ async def load_credential() -> QqCredential | None:
         return None
     credential = QqCredential.from_stored(stored.credential)
     return credential if credential.is_valid else None
+
+
+async def refresh_saved_credential(
+    client: httpx.AsyncClient,
+    credential: QqCredential,
+) -> QqCredential | None:
+    """串行刷新扫码凭据并原子写回；失败时保留旧凭据。"""
+    async with _refresh_lock:
+        stored = await load_credential()
+        if stored is not None and stored.expires_at > credential.expires_at and not stored.needs_refresh():
+            return stored
+        if not credential.refresh_key and not credential.refresh_token:
+            logger.warning("[Parser·QQ音乐] 凭据缺少 refresh_key/refresh_token，无法自动续期")
+            return None
+        try:
+            refreshed = await QqMusicClient(client).refresh_credential(credential)
+            await save_credential(refreshed)
+        except (ParseException, OSError) as exc:
+            logger.warning(
+                f"[Parser·QQ音乐] 凭据自动续期失败 | error_type={type(exc).__name__} | "
+                f"error={sanitize_error_text(str(exc), hide_local_paths=True)}"
+            )
+            return None
+        logger.info(
+            f"[Parser·QQ音乐] 凭据自动续期成功 | musicid={refreshed.display_id} | expires_in={refreshed.key_expires_in}"
+        )
+        return refreshed
 
 
 async def save_credential(credential: QqCredential) -> None:

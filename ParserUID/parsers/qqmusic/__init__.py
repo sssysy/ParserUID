@@ -65,7 +65,10 @@ async def qqmusic_status(bot: Bot, ev: Event) -> None:
         if credential is None:
             await bot.send("QQ音乐未登录；发送“QQ音乐登录”获取二维码")
             return
-        await bot.send(f"QQ音乐已登录（{source}）：{saved_credential_description(credential)}")
+        auto_refresh = "已启用" if credential.refresh_key or credential.refresh_token else "缺少续期字段"
+        await bot.send(
+            f"QQ音乐已登录（{source}）：{saved_credential_description(credential)}\n自动续期：{auto_refresh}"
+        )
     finally:
         if owns_parser:
             await parser.close()

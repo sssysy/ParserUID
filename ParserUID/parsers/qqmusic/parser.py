@@ -7,13 +7,15 @@ from typing import ClassVar
 from pathlib import Path
 from collections.abc import Sequence
 
+import httpx
+
 from gsuid_core.logger import logger
 
 from .qmc import QmcError
-from .auth import load_credential, credential_from_config
+from .auth import load_credential, credential_from_config, refresh_saved_credential
 from ..base import BaseParser, handle
 from .lyric import fetch_lyric
-from .client import WEB_UA, QqMusicClient
+from .client import WEB_UA, QqAuthError, QqMusicClient
 from .models import QqTrack, QqSinger, QqCredential, QqInfoSection, QqSongDetailData
 from .decrypt import decrypt_qqmusic_file
 from .quality import ResolvedAudio, resolve_audio, normalize_quality
@@ -57,8 +59,8 @@ class QQMusicParser(BaseParser):
         return await self._parse_song_id(searched.group("song_id"))
 
     async def _parse_song_id(self, song_id: str) -> Sequence[ContentItem]:
-        credential = await self._credential()
         client = await self.get_client()
+        credential = await self._credential(client)
         qqmusic = QqMusicClient(client)
         detail = await qqmusic.song_detail(song_id, credential)
         track = detail.track_info
@@ -66,7 +68,16 @@ class QQMusicParser(BaseParser):
             raise ParseException("QQ音乐未返回歌曲 MID")
 
         preferred = normalize_quality(self.get_config_value("quality", "auto"))
-        audio = await resolve_audio(qqmusic, track, credential, preferred)
+        try:
+            audio = await resolve_audio(qqmusic, track, credential, preferred)
+        except QqAuthError:
+            if credential is None or self._manual_cookie_active():
+                raise
+            refreshed = await refresh_saved_credential(client, credential)
+            if refreshed is None:
+                raise
+            credential = refreshed
+            audio = await resolve_audio(qqmusic, track, credential, preferred)
         lyric = await fetch_lyric(qqmusic, track, credential)
         await self._send_song_card(detail, track, audio)
 
@@ -80,14 +91,22 @@ class QQMusicParser(BaseParser):
             contents.append(self.create_text_content(lyric))
         return self.result(contents)
 
-    async def _credential(self) -> QqCredential | None:
+    async def _credential(self, client: httpx.AsyncClient) -> QqCredential | None:
         configured = self.get_config_value("cookie").strip()
         if configured:
             credential = credential_from_config(configured)
             if credential is None:
                 raise ParseException("QQ音乐 Cookie 配置无效")
             return credential
-        return await load_credential()
+        credential = await load_credential()
+        if credential is not None and credential.needs_refresh():
+            refreshed = await refresh_saved_credential(client, credential)
+            if refreshed is not None:
+                return refreshed
+        return credential
+
+    def _manual_cookie_active(self) -> bool:
+        return bool(self.get_config_value("cookie").strip())
 
     async def _send_song_card(
         self,

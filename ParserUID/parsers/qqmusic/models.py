@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from msgspec import Raw, Struct, field
@@ -215,6 +216,7 @@ class QqCredential:
     refresh_token: str = ""
     refresh_key: str = ""
     access_token: str = ""
+    expired_at: int = 0
     unionid: str = ""
     str_musicid: str = ""
     musickey_create_time: int = 0
@@ -231,11 +233,27 @@ class QqCredential:
     def display_id(self) -> str:
         return self.str_musicid or str(self.musicid)
 
+    @property
+    def expires_at(self) -> int:
+        if self.musickey_create_time <= 0 or self.key_expires_in <= 0:
+            return 0
+        return self.musickey_create_time + self.key_expires_in
+
+    @property
+    def is_expired(self) -> bool:
+        expires_at = self.expires_at
+        return expires_at > 0 and time.time() >= expires_at
+
+    def needs_refresh(self, margin_seconds: int = 43200) -> bool:
+        expires_at = self.expires_at
+        return expires_at > 0 and time.time() >= expires_at - max(0, margin_seconds)
+
     def to_stored(self) -> QqStoredCredentialData:
         return QqStoredCredentialData(
             openid=self.openid,
             refresh_token=self.refresh_token,
             access_token=self.access_token,
+            expired_at=self.expired_at,
             musicid=self.musicid,
             musickey=self.musickey,
             unionid=self.unionid,
@@ -260,6 +278,7 @@ class QqCredential:
             refresh_token=data.refresh_token,
             refresh_key=data.refresh_key,
             access_token=data.access_token,
+            expired_at=data.expired_at,
             unionid=data.unionid,
             str_musicid=data.str_musicid or (str(data.musicid) if data.musicid > 0 else ""),
             musickey_create_time=data.musickey_create_time,

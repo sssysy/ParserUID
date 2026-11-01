@@ -51,6 +51,15 @@ _SUB_ERROR_MESSAGES: dict[int, str] = {
     20450: "账号已被封禁",
     104604: "操作过于频繁，请稍后再试",
 }
+_AUTH_ERROR_CODES = frozenset({1000, 104400, 104401})
+
+
+class QqAuthError(ParseException):
+    """QQ音乐登录态失效异常。"""
+
+    def __init__(self, message: str, code: int) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class QqMusicClient:
@@ -166,6 +175,41 @@ class QqMusicClient:
         )
         return _credential_from_login_data(_decode_data(sub.data, QqLoginData, "微信登录"))
 
+    async def refresh_credential(self, credential: QqCredential) -> QqCredential:
+        login_type = credential.login_type or _infer_login_type(credential.musickey)
+        param: dict[str, object] = {
+            "openid": credential.openid,
+            "refresh_token": credential.refresh_token,
+            "refresh_key": credential.refresh_key,
+            "loginMode": 2,
+        }
+        if login_type == 1:
+            param["str_musicid"] = credential.str_musicid or str(credential.musicid)
+            param["musickey"] = credential.musickey
+            param["unionid"] = credential.unionid
+        elif login_type == 2:
+            param["access_token"] = credential.access_token
+            param["expired_in"] = credential.expired_at
+            param["musicid"] = credential.musicid
+            param["musickey"] = credential.musickey
+        else:
+            param["access_token"] = credential.access_token
+            param["expired_in"] = credential.expired_at
+            param["str_musicid"] = credential.str_musicid or str(credential.musicid)
+            param["musicid"] = credential.musicid
+            param["musickey"] = credential.musickey
+            param["unionid"] = credential.unionid
+        sub = await self.call(
+            "music.login.LoginServer",
+            "Login",
+            param,
+            platform="android",
+            credential=credential,
+            extra_comm={"tmeLoginType": str(login_type)},
+        )
+        refreshed = _credential_from_login_data(_decode_data(sub.data, QqLoginData, "凭据刷新"))
+        return _merge_credential(credential, refreshed)
+
     async def call(
         self,
         module: str,
@@ -192,6 +236,8 @@ class QqMusicClient:
             sub = await self._execute(payload, platform, signed=True)
         if sub.code != 0:
             message = _SUB_ERROR_MESSAGES.get(sub.code, f"QQ音乐接口返回错误码 {sub.code}")
+            if sub.code in _AUTH_ERROR_CODES:
+                raise QqAuthError(message, sub.code)
             raise ParseException(message)
         return sub
 
@@ -290,6 +336,7 @@ def _credential_from_login_data(data: QqLoginData) -> QqCredential:
         refresh_token=data.refresh_token,
         refresh_key=data.refresh_key,
         access_token=data.access_token,
+        expired_at=data.expired_at,
         unionid=data.unionid,
         str_musicid=data.str_musicid or str(data.musicid),
         musickey_create_time=data.musickeyCreateTime,
@@ -302,6 +349,26 @@ def _credential_from_login_data(data: QqLoginData) -> QqCredential:
 
 def _infer_login_type(musickey: str) -> int:
     return 1 if musickey.startswith("W_X_") else 2
+
+
+def _merge_credential(previous: QqCredential, refreshed: QqCredential) -> QqCredential:
+    return QqCredential(
+        musicid=refreshed.musicid or previous.musicid,
+        musickey=refreshed.musickey or previous.musickey,
+        login_type=refreshed.login_type or previous.login_type,
+        openid=refreshed.openid or previous.openid,
+        refresh_token=refreshed.refresh_token or previous.refresh_token,
+        refresh_key=refreshed.refresh_key or previous.refresh_key,
+        access_token=refreshed.access_token or previous.access_token,
+        expired_at=refreshed.expired_at or previous.expired_at,
+        unionid=refreshed.unionid or previous.unionid,
+        str_musicid=refreshed.str_musicid or previous.str_musicid,
+        musickey_create_time=refreshed.musickey_create_time or previous.musickey_create_time,
+        key_expires_in=refreshed.key_expires_in or previous.key_expires_in,
+        encrypt_uin=refreshed.encrypt_uin or previous.encrypt_uin,
+        bind_account_type=refreshed.bind_account_type or previous.bind_account_type,
+        need_refresh_key_in=refreshed.need_refresh_key_in or previous.need_refresh_key_in,
+    )
 
 
 def _new_guid() -> str:
