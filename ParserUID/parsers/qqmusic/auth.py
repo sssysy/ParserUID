@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import httpx
 import msgspec
 
+from gsuid_core.logger import logger
 from gsuid_core.data_store import get_res_path
 
 from .sign import hash33
@@ -94,7 +95,8 @@ async def _create_qq_qr(client: httpx.AsyncClient) -> QrSession:
         )
         response.raise_for_status()
     except httpx.HTTPError as exc:
-        raise ParseException("QQ音乐二维码请求失败") from exc
+        logger.warning(f"[Parser·QQ音乐] 登录二维码请求失败 | error_type={type(exc).__name__}")
+        raise ParseException(_http_error_message("QQ音乐二维码请求失败", exc)) from exc
     qrsig = response.cookies.get("qrsig")
     if not qrsig or not response.content:
         raise ParseException("QQ音乐二维码响应不完整")
@@ -133,7 +135,8 @@ async def _check_qq_qr(
         )
         response.raise_for_status()
     except httpx.HTTPError as exc:
-        raise ParseException("QQ音乐扫码状态请求失败") from exc
+        logger.warning(f"[Parser·QQ音乐] 扫码状态请求失败 | error_type={type(exc).__name__}")
+        raise ParseException(_http_error_message("QQ音乐扫码状态请求失败", exc)) from exc
 
     status_match = _QQ_STATUS_RE.search(response.text)
     if status_match is None:
@@ -157,11 +160,22 @@ async def _check_qq_qr(
     uin_match = _QQ_UIN_RE.findall(args[2])
     if not sigx_match or not uin_match:
         raise ParseException("QQ音乐扫码结果缺少授权参数")
-    credential = await _authorize_qq(client, uin=uin_match[0], sigx=sigx_match[0])
+    credential = await _authorize_qq(
+        client,
+        uin=uin_match[0],
+        sigx=sigx_match[0],
+        qrsig=session.identifier,
+    )
     return QrState.CONFIRMED, credential, "登录成功"
 
 
-async def _authorize_qq(client: httpx.AsyncClient, *, uin: str, sigx: str) -> QqCredential:
+async def _authorize_qq(
+    client: httpx.AsyncClient,
+    *,
+    uin: str,
+    sigx: str,
+    qrsig: str,
+) -> QqCredential:
     check_params = {
         "uin": uin,
         "pttype": "1",
@@ -183,16 +197,20 @@ async def _authorize_qq(client: httpx.AsyncClient, *, uin: str, sigx: str) -> Qq
         "pt_3rd_aid": "100497308",
     }
     try:
-        check_response = await client.get(
-            QQ_CHECK_SIG_URL,
-            params=check_params,
-            headers=_LOGIN_HEADERS,
-            cookies={},
-            follow_redirects=False,
+        check_response = await _request_check_sig(client, check_params, cookies={})
+    except httpx.HTTPError as first_error:
+        logger.warning(
+            f"[Parser·QQ音乐] 授权票据首次请求失败，使用 qrsig 重试 | error_type={type(first_error).__name__}"
         )
-        check_response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise ParseException("QQ音乐授权票据请求失败") from exc
+        try:
+            check_response = await _request_check_sig(
+                client,
+                check_params,
+                cookies={"qrsig": qrsig},
+            )
+        except httpx.HTTPError as exc:
+            logger.warning(f"[Parser·QQ音乐] 授权票据请求失败 | error_type={type(exc).__name__}")
+            raise ParseException(_http_error_message("QQ音乐授权票据请求失败", exc)) from exc
     p_skey = check_response.cookies.get("p_skey")
     if not p_skey:
         raise ParseException("QQ音乐授权票据缺少 p_skey")
@@ -222,7 +240,8 @@ async def _authorize_qq(client: httpx.AsyncClient, *, uin: str, sigx: str) -> Qq
         )
         authorize_response.raise_for_status()
     except httpx.HTTPError as exc:
-        raise ParseException("QQ音乐授权请求失败") from exc
+        logger.warning(f"[Parser·QQ音乐] 授权请求失败 | error_type={type(exc).__name__}")
+        raise ParseException(_http_error_message("QQ音乐授权请求失败", exc)) from exc
     location = authorize_response.headers.get("Location", "")
     code_matches = re.findall(r"(?<=code=)(.+?)(?=&)", location)
     if not code_matches and authorize_response.text:
@@ -230,6 +249,23 @@ async def _authorize_qq(client: httpx.AsyncClient, *, uin: str, sigx: str) -> Qq
     if not code_matches:
         raise ParseException("QQ音乐授权未返回登录 code")
     return await QqMusicClient(client).login_qq(code_matches[0])
+
+
+async def _request_check_sig(
+    client: httpx.AsyncClient,
+    params: dict[str, str],
+    *,
+    cookies: dict[str, str],
+) -> httpx.Response:
+    response = await client.get(
+        QQ_CHECK_SIG_URL,
+        params=params,
+        headers=_LOGIN_HEADERS,
+        cookies=cookies,
+        follow_redirects=False,
+    )
+    response.raise_for_status()
+    return response
 
 
 async def _create_wx_qr(client: httpx.AsyncClient) -> QrSession:
@@ -245,7 +281,8 @@ async def _create_wx_qr(client: httpx.AsyncClient) -> QrSession:
         response = await client.get(WX_QR_PAGE_URL, params=params, cookies={}, follow_redirects=False)
         response.raise_for_status()
     except httpx.HTTPError as exc:
-        raise ParseException("QQ音乐微信二维码请求失败") from exc
+        logger.warning(f"[Parser·QQ音乐] 微信二维码请求失败 | error_type={type(exc).__name__}")
+        raise ParseException(_http_error_message("QQ音乐微信二维码请求失败", exc)) from exc
     matches = _WX_UUID_RE.findall(response.text)
     if not matches:
         raise ParseException("QQ音乐微信二维码缺少 uuid")
@@ -259,7 +296,8 @@ async def _create_wx_qr(client: httpx.AsyncClient) -> QrSession:
         )
         qr_response.raise_for_status()
     except httpx.HTTPError as exc:
-        raise ParseException("QQ音乐微信二维码图片请求失败") from exc
+        logger.warning(f"[Parser·QQ音乐] 微信二维码图片请求失败 | error_type={type(exc).__name__}")
+        raise ParseException(_http_error_message("QQ音乐微信二维码图片请求失败", exc)) from exc
     if not qr_response.content:
         raise ParseException("QQ音乐微信二维码图片为空")
     return QrSession(kind=QrKind.WX, data=qr_response.content, identifier=uuid)
@@ -282,7 +320,8 @@ async def _check_wx_qr(
     except httpx.TimeoutException:
         return QrState.WAITING, None, "等待扫码中"
     except httpx.HTTPError as exc:
-        raise ParseException("QQ音乐微信扫码状态请求失败") from exc
+        logger.warning(f"[Parser·QQ音乐] 微信扫码状态请求失败 | error_type={type(exc).__name__}")
+        raise ParseException(_http_error_message("QQ音乐微信扫码状态请求失败", exc)) from exc
 
     status_match = _WX_STATUS_RE.search(response.text)
     if status_match is None:
@@ -417,3 +456,9 @@ def _cookie_value(values: dict[str, str], *names: str) -> str:
 
 def _infer_login_type(musickey: str) -> int:
     return 1 if musickey.startswith("W_X_") else 2
+
+
+def _http_error_message(prefix: str, exc: httpx.HTTPError) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"{prefix}（HTTP {exc.response.status_code}）"
+    return f"{prefix}（{type(exc).__name__}）"
