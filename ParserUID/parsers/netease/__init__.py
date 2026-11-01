@@ -15,12 +15,13 @@ PARSER = NeteaseParser
 sv = SV("网易云音乐解析器命令", pm=0, area="ALL")
 
 
-@sv.on_fullmatch(LOGIN_COMMAND, block=True)
+@sv.on_command(LOGIN_COMMAND, block=True)
 async def netease_login(bot: Bot, ev: Event) -> None:
-    """生成网易云扫码二维码，轮询在受管后台任务中进行。"""
-    del ev
+    """生成网易云扫码二维码，支持 nlogin（PC 客户端模式）与 nlogin web（网页模式）。"""
+    arg = ev.text.strip().lower()
+    mode = "web" if "web" in arg else "pc"
     try:
-        await start_login(bot)
+        await start_login(bot, mode=mode)
     except ParseException as exc:
         detail = sanitize_error_text(str(exc), hide_local_paths=True)
         await bot.send(f"网易云登录失败：{detail}")

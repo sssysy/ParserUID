@@ -55,6 +55,12 @@
 | 波点音乐 | 🚫 | 🚫 | ✅ | ❌ | |
 | 没找到你想要的解析器？ |❓ |❓ |❓ | ❓| 参考[解析器添加和编写](#解析器添加和编写)一键适配对应平台！ |
 
+## 丨渲染预览图
+
+|链接触发|卡片触发|视频卡片渲染(默认皮肤)|图文卡片渲染(默认皮肤)|
+|:------:|:------:|:------:|:------:|
+|![链接触发](https://cnb.cool/shiysssysy/img/-/git/raw/main/ParserUID/%E9%93%BE%E6%8E%A5%E4%BA%A4%E4%BA%92.png)|![卡片触发](https://cnb.cool/shiysssysy/img/-/git/raw/main/ParserUID/%E5%8D%A1%E7%89%87%E4%BA%A4%E4%BA%92.png)|![视频卡片渲染(默认皮肤)](https://cnb.cool/shiysssysy/img/-/git/raw/main/ParserUID/b%E7%AB%99%E6%B8%B2%E6%9F%93.png)|![图文卡片渲染(默认皮肤)](https://cnb.cool/shiysssysy/img/-/git/raw/main/ParserUID/ins%E6%B8%B2%E6%9F%93.png)|
+
 ## 丨添加其他解析器 / 皮肤包
 #### 解析器添加和编写
 > 编写可以使用本插件 [`parser-development`](.agents/skills/parser-development) 技能让 ai agent 适配对应网站
@@ -88,7 +94,15 @@
 #### 3. 解析器发送了渲染卡片但是不发送视频 / 文件？
 > 如为 docker 环境，请检查您的协议端是否**挂载框架 data 目录**以及挂载目录**是否对应正确**
 
+#### 4. 部分平台需要Cookie / 部分平台解析失败？
+> 部分平台解析失败请先检查是否配置了**Cookie**，并确认Cookie是否**有效**
+> 因为部分平台无Cookie抓不到信息，同时部分平台比如哔哩哔哩建议使用解析器自带的扫码登录命令登录
 
+#### 5. Cookie获取方法
+> 1. 安装 Cookie Editor [Edge](https://microsoftedge.microsoft.com/addons/detail/cookieeditor/neaplmfkghagebokkhpjpoebhdledlfi) | [Chrome](https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm)
+> 2. 进入对应平台，在 Cookie Editor 中点击**右下角 Export** 按钮
+> 3. 点击**Header String** 复制 Cookie
+> 4. 回到本插件对应解析器 Cookie 填写处粘贴
 ## 致谢
 | 贡献者 | 引用 |
 |:------:|:------:|

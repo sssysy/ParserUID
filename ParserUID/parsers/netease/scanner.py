@@ -36,7 +36,7 @@ async def cancel_login_tasks() -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def start_login(bot: Bot) -> None:
+async def start_login(bot: Bot, *, mode: str = "pc") -> None:
     """生成二维码并交给后台轮询，命令立即返回。"""
     async with _login_lock:
         parser = await NeteaseParser.active_instance()
@@ -45,7 +45,8 @@ async def start_login(bot: Bot) -> None:
             parser = NeteaseParser()
         try:
             client = await parser.get_client()
-            session = await create_qr_session(client)
+            qr_type = 1 if mode == "web" else 3
+            session = await create_qr_session(client, qr_type=qr_type)
             await bot.send(MessageSegment.image(build_qr_image(session.qr_url)))
             _track_task(_finish_login(bot, client, session, parser, owns_parser))
             owns_parser = False

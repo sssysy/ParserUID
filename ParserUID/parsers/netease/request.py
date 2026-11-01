@@ -6,13 +6,14 @@ import hmac
 import time
 import base64
 import random
+import secrets
 from dataclasses import dataclass
 from collections.abc import Mapping
 
 import httpx
 import msgspec
 
-from .auth import load_credential, load_public_key_state, save_public_key_state
+from .auth import load_credential, random_device_id, load_public_key_state, save_public_key_state
 from .crypto import (
     XeapiPublicKey,
     eapi_form,
@@ -28,8 +29,15 @@ EAPI_HOST = "https://interfacepc.music.163.com"
 WEAPI_HOST = "https://music.163.com"
 XEAPI_HOST = "https://interface3.music.163.com"
 API_HOST = "https://interface.music.163.com"
-UA_WEB = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+UA_WEB = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"
+)
 UA_ANDROID = "NeteaseMusic/9.5.61.260802021928(9005061);Dalvik/2.1.0 (Linux; U; Android 12; HBN-AL00 Build/cd737a2.0)"
+UA_PC_CLIENT = (
+    "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.1.29.205117"
+)
 SIGN_KEY_VERSION = 0
 
 
@@ -49,31 +57,44 @@ class DeviceContext:
     music_u: str
     music_a: str
     nmtid: str
+    ntes_nuid: str
+    ntes_nnid: str
+    wnmcid: str
 
     @classmethod
     def from_values(cls, values: Mapping[str, str]) -> DeviceContext:
-        device_id = values.get("deviceId", "")
+        device_id = values.get("deviceId") or values.get("sDeviceId") or random_device_id()
+        s_device_id = values.get("sDeviceId") or device_id
+        now_ms = int(time.time() * 1000)
+        nuid = values.get("_ntes_nuid") or secrets.token_hex(16)
+        nnid = values.get("_ntes_nnid") or f"{nuid},{now_ms}"
+        wnmcid_rand = "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(6))
+        wnmcid = values.get("WNMCID") or f"{wnmcid_rand}.{now_ms}.01.0"
         return cls(
-            os=values.get("os", "iphone"),
-            osver=values.get("osver", "16.2"),
-            appver=values.get("appver", "9.0.90"),
+            os=values.get("os", "pc"),
+            osver=values.get("osver", "Microsoft-Windows-10-Professional-build-19045-64bit"),
+            appver=values.get("appver", "3.1.17.204416"),
             versioncode=values.get("versioncode", "140"),
             mobilename=values.get("mobilename", ""),
-            buildver=values.get("buildver", "1770000000"),
+            buildver=values.get("buildver", str(int(time.time()))[:10]),
             resolution=values.get("resolution", "1920x1080"),
-            channel=values.get("channel", "distribution"),
+            channel=values.get("channel", "netease"),
             csrf=values.get("__csrf", ""),
             device_id=device_id,
-            s_device_id=values.get("sDeviceId", device_id),
+            s_device_id=s_device_id,
             music_u=values.get("MUSIC_U", ""),
             music_a=values.get("MUSIC_A", ""),
             nmtid=values.get("NMTID", ""),
+            ntes_nuid=nuid,
+            ntes_nnid=nnid,
+            wnmcid=wnmcid,
         )
 
     def cookie_values(self) -> dict[str, str]:
         values = {
             "osver": self.osver,
             "deviceId": self.device_id,
+            "sDeviceId": self.s_device_id,
             "os": self.os,
             "appver": self.appver,
             "versioncode": self.versioncode,
@@ -82,7 +103,13 @@ class DeviceContext:
             "resolution": self.resolution,
             "__csrf": self.csrf,
             "channel": self.channel,
-            "requestId": f"{int(time.time() * 1000)}_0000",
+            "requestId": f"{int(time.time() * 1000)}_{secrets.randbelow(1000):04d}",
+            "_ntes_nuid": self.ntes_nuid,
+            "_ntes_nnid": self.ntes_nnid,
+            "WNMCID": self.wnmcid,
+            "WEVNSM": "1.0.0",
+            "ntes_kaola_ad": "1",
+            "__remember_me": "true",
             "MUSIC_U": self.music_u,
             "MUSIC_A": self.music_a,
             "NMTID": self.nmtid,
@@ -105,6 +132,9 @@ class DeviceContext:
             music_u=self.music_u,
             music_a=self.music_a,
             nmtid=self.nmtid,
+            ntes_nuid=self.ntes_nuid,
+            ntes_nnid=self.ntes_nnid,
+            wnmcid=self.wnmcid,
         )
 
 
@@ -145,13 +175,14 @@ class NeteaseClient:
             "resolution": device.resolution,
             "__csrf": device.csrf,
             "channel": device.channel,
-            "requestId": f"{int(time.time() * 1000)}_0000",
+            "requestId": f"{int(time.time() * 1000)}_{secrets.randbelow(1000):04d}",
         }
         body = dict(data)
         body["e_r"] = False
         body["header"] = header
+        ua = UA_PC_CLIENT if device.os == "pc" else (UA_ANDROID if device.os == "android" else UA_WEB)
         headers = {
-            "User-Agent": UA_WEB if device.os != "android" else UA_ANDROID,
+            "User-Agent": ua,
             "Referer": "https://music.163.com/",
             "Cookie": self._header_cookie(cookie),
         }
@@ -166,7 +197,7 @@ class NeteaseClient:
             raise ParseException("网易云 EAPI 请求失败") from exc
         return _json_object(response.content), response
 
-    async def weapi(self, uri: str, data: dict[str, object]) -> dict[str, object]:
+    async def weapi_raw(self, uri: str, data: dict[str, object]) -> tuple[dict[str, object], httpx.Response]:
         from .crypto import weapi_form
 
         if not uri.startswith("/api/"):
@@ -188,7 +219,11 @@ class NeteaseClient:
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise ParseException("网易云 WEAPI 请求失败") from exc
-        return _json_object(response.content)
+        return _json_object(response.content), response
+
+    async def weapi(self, uri: str, data: dict[str, object]) -> dict[str, object]:
+        result, _ = await self.weapi_raw(uri, data)
+        return result
 
     async def _ensure_public_key(self) -> XeapiPublicKey:
         if self._public_key is not None:

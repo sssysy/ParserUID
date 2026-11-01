@@ -37,6 +37,18 @@ class QrSession:
     key: str
     qr_url: str
     state: QrState = QrState.WAITING
+    qr_type: int = 3
+
+
+def random_device_id() -> str:
+    return "".join(secrets.choice("0123456789ABCDEF") for _ in range(52))
+
+
+def generate_chain_id(s_device_id: str | None = None) -> str:
+    version = "v1"
+    dev_id = s_device_id or f"unknown-{secrets.randbelow(1000000)}"
+    timestamp = int(time.time() * 1000)
+    return f"{version}_{dev_id}_web_login_{timestamp}"
 
 
 def build_qr_image(content: str) -> bytes:
@@ -48,12 +60,17 @@ def build_qr_image(content: str) -> bytes:
     return buffer.getvalue()
 
 
-async def create_qr_session(client: httpx.AsyncClient) -> QrSession:
-    from .request import NeteaseClient
+async def create_qr_session(client: httpx.AsyncClient, *, qr_type: int = 3) -> QrSession:
+    from .request import DeviceContext, NeteaseClient
 
-    payload: dict[str, object] = {"type": 3}
+    nc = NeteaseClient(client)
+    device = DeviceContext.from_values(nc.cookie)
+    payload: dict[str, object] = {"type": qr_type}
     try:
-        result, _ = await NeteaseClient(client).eapi(QR_KEY_URI, payload)
+        if qr_type == 1:
+            result = await nc.weapi(QR_KEY_URI, payload)
+        else:
+            result, _ = await nc.eapi(QR_KEY_URI, payload)
     except httpx.HTTPError as exc:
         raise ParseException("网易云二维码请求失败") from exc
     code = result.get("code")
@@ -63,15 +80,21 @@ async def create_qr_session(client: httpx.AsyncClient) -> QrSession:
         key = nested.get("unikey", key)
     if code != 200 or not isinstance(key, str) or not key:
         raise ParseException("网易云二维码 key 无效")
-    return QrSession(key=key, qr_url=f"{QR_LOGIN_PREFIX}{key}")
+    chain_id = generate_chain_id(device.s_device_id)
+    return QrSession(key=key, qr_url=f"{QR_LOGIN_PREFIX}{key}&chainId={chain_id}", qr_type=qr_type)
 
 
 async def check_qr_session(client: httpx.AsyncClient, session: QrSession) -> tuple[QrState, str]:
-    from .request import NeteaseClient
+    from .request import DeviceContext, NeteaseClient
 
-    payload: dict[str, object] = {"key": session.key, "type": 3}
+    nc = NeteaseClient(client)
+    device = DeviceContext.from_values(nc.cookie)
+    payload: dict[str, object] = {"key": session.key, "type": session.qr_type}
     try:
-        result, response = await NeteaseClient(client).eapi(QR_CHECK_URI, payload)
+        if session.qr_type == 1:
+            result, response = await nc.weapi_raw(QR_CHECK_URI, payload)
+        else:
+            result, response = await nc.eapi(QR_CHECK_URI, payload)
     except httpx.HTTPError as exc:
         raise ParseException("网易云扫码状态请求失败") from exc
     code = result.get("code")
@@ -82,8 +105,13 @@ async def check_qr_session(client: httpx.AsyncClient, session: QrSession) -> tup
     if code == 802:
         return QrState.SCANNED, "已扫码，请在手机上确认"
     if code == 803:
-        cookie = _extract_cookie(response.headers.get_list("set-cookie"))
-        if not cookie:
+        body_cookie = result.get("cookie")
+        cookie = _extract_cookie(
+            response.headers.get_list("set-cookie"),
+            body_cookie=body_cookie if isinstance(body_cookie, str) else None,
+            existing_device_id=device.device_id,
+        )
+        if not cookie or not cookie.get("MUSIC_U"):
             return QrState.EXPIRED, "登录成功但未收到有效 Cookie"
         save_credential(cookie)
         return QrState.CONFIRMED, "登录成功"
@@ -107,21 +135,28 @@ async def poll_qr_login(
     return QrState.EXPIRED, "二维码登录超时"
 
 
-def _extract_cookie(headers: list[str]) -> dict[str, str]:
+def _extract_cookie(
+    headers: list[str],
+    *,
+    body_cookie: str | None = None,
+    existing_device_id: str | None = None,
+) -> dict[str, str]:
     values: dict[str, str] = {}
     for raw in headers:
         first = raw.split(";", 1)[0]
         name, separator, value = first.partition("=")
         if separator and name.strip() and value.strip():
             values[name.strip()] = value.strip()
+    if body_cookie:
+        for part in body_cookie.split(";"):
+            name, separator, value = part.partition("=")
+            if separator and name.strip() and value.strip():
+                values.setdefault(name.strip(), value.strip())
     values.setdefault("os", "pc")
-    values.setdefault("deviceId", _random_device_id())
+    device_id = existing_device_id or random_device_id()
+    values.setdefault("deviceId", device_id)
     values.setdefault("sDeviceId", values["deviceId"])
     return values
-
-
-def _random_device_id() -> str:
-    return "".join(secrets.choice("0123456789ABCDEF") for _ in range(52))
 
 
 def save_credential(cookie: dict[str, str]) -> None:
