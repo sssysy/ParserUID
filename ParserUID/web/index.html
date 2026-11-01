@@ -158,7 +158,7 @@
             <div>
               <p id="skin-message">正在读取皮肤设置...</p>
               <p class="notice__secondary">
-                第三方皮肤属于受信任代码，切换时会要求确认；页面不会直接指定模板路径。
+                第三方皮肤包请放到 data/ParserUID/thirdparty/renderskinpacks/ 目录下，重载插件后将在此处见到。
               </p>
             </div>
           </div>
@@ -209,6 +209,42 @@
         </div>
       </section>
     </main>
+
+    <div
+      class="dialog-scrim"
+      id="confirm-dialog"
+      hidden
+    >
+      <section
+        class="confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+        aria-describedby="confirm-dialog-message"
+        tabindex="-1"
+      >
+        <div class="confirm-dialog__content">
+          <h2 id="confirm-dialog-title"></h2>
+          <p id="confirm-dialog-message"></p>
+        </div>
+        <div class="confirm-dialog__actions">
+          <button
+            class="text-button"
+            id="confirm-dialog-cancel"
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            class="filled-button"
+            id="confirm-dialog-confirm"
+            type="button"
+          >
+            确认
+          </button>
+        </div>
+      </section>
+    </div>
 
     <div
       class="snackbar"

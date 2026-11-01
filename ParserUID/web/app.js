@@ -42,6 +42,11 @@
     skinMessage: document.getElementById("skin-message"),
     snackbar: document.getElementById("snackbar"),
     snackbarMessage: document.getElementById("snackbar-message"),
+    confirmDialog: document.getElementById("confirm-dialog"),
+    confirmDialogTitle: document.getElementById("confirm-dialog-title"),
+    confirmDialogMessage: document.getElementById("confirm-dialog-message"),
+    confirmDialogCancel: document.getElementById("confirm-dialog-cancel"),
+    confirmDialogConfirm: document.getElementById("confirm-dialog-confirm"),
     saveStatus: document.getElementById("save-status"),
     saveAll: document.getElementById("save-all"),
     discardAll: document.getElementById("discard-all"),
@@ -100,6 +105,9 @@
   };
 
   let snackbarTimer = 0;
+  let dialogResolver = null;
+  let dialogReturnFocus = null;
+  let dialogHideTimer = 0;
 
   function cloneValue(value) {
     return Array.isArray(value) ? [...value] : value;
@@ -129,6 +137,88 @@
     snackbarTimer = window.setTimeout(() => {
       refs.snackbar.classList.remove("is-visible");
     }, duration);
+  }
+
+  function dismissConfirmDialog(confirmed) {
+    if (!dialogResolver) return;
+    const resolve = dialogResolver;
+    dialogResolver = null;
+    refs.confirmDialog.classList.remove("is-open");
+    refs.confirmDialog.classList.add("is-closing");
+    window.clearTimeout(dialogHideTimer);
+    dialogHideTimer = window.setTimeout(() => {
+      refs.confirmDialog.hidden = true;
+      refs.confirmDialog.classList.remove("is-closing");
+    }, 200);
+    if (
+      dialogReturnFocus instanceof HTMLElement &&
+      dialogReturnFocus.isConnected
+    ) {
+      dialogReturnFocus.focus({ preventScroll: true });
+    }
+    dialogReturnFocus = null;
+    resolve(confirmed);
+  }
+
+  function showConfirmDialog({ title, message, confirmLabel = "确认" }) {
+    if (dialogResolver) {
+      dismissConfirmDialog(false);
+    }
+    return new Promise((resolve) => {
+      dialogResolver = resolve;
+      dialogReturnFocus =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      refs.confirmDialogTitle.textContent = title;
+      refs.confirmDialogMessage.textContent = message;
+      refs.confirmDialogConfirm.textContent = confirmLabel;
+      window.clearTimeout(dialogHideTimer);
+      refs.confirmDialog.hidden = false;
+      refs.confirmDialog.classList.remove("is-closing");
+      window.requestAnimationFrame(() => {
+        if (!dialogResolver) return;
+        refs.confirmDialog.classList.add("is-open");
+        refs.confirmDialogCancel.focus({ preventScroll: true });
+      });
+    });
+  }
+
+  function bindConfirmDialog() {
+    refs.confirmDialogCancel.addEventListener("click", () => {
+      dismissConfirmDialog(false);
+    });
+    refs.confirmDialogConfirm.addEventListener("click", () => {
+      dismissConfirmDialog(true);
+    });
+    refs.confirmDialog.addEventListener("click", (event) => {
+      if (event.target === refs.confirmDialog) {
+        dismissConfirmDialog(false);
+      }
+    });
+    refs.confirmDialog.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dismissConfirmDialog(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [
+        ...refs.confirmDialog.querySelectorAll(
+          "button:not(:disabled), [tabindex]:not([tabindex='-1'])",
+        ),
+      ];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
   }
 
   function createDraft(parser) {
@@ -1232,11 +1322,14 @@
       return;
     }
     const skin = skinData.skins.find((item) => item.name === name);
-    if (
-      skin?.source === "thirdparty" &&
-      !window.confirm("第三方皮肤包包含受信任的模板和 Python 代码，确认切换并启用？")
-    ) {
-      return;
+    if (skin?.source === "thirdparty") {
+      const confirmed = await showConfirmDialog({
+        title: "启用第三方皮肤包？",
+        message:
+          "第三方皮肤包包含受信任的模板和 Python 代码，确认切换并启用？",
+        confirmLabel: "切换并启用",
+      });
+      if (!confirmed) return;
     }
     try {
       await apiPost("skin", { name, confirmed: skin?.source === "thirdparty" });
@@ -1353,6 +1446,7 @@
   async function start() {
     bindTabs();
     bindEvents();
+    bindConfirmDialog();
 
     if (window.GsHubPlugin) {
       await window.GsHubPlugin.ready;
