@@ -21,6 +21,7 @@ from ..parsers.config import (
 
 RuleTuple: TypeAlias = tuple[str, re.Pattern[str], BaseParser]
 LOGO_FILENAME = "logo.png"
+THIRDPARTY_MODULE_PREFIX = "parseruid_thirdparty"
 
 
 class ParserMatchResult:
@@ -107,6 +108,19 @@ def _load_manifest_from_dir(dir_path: Path) -> ParserManifest | None:
         return None
 
 
+def _install_parseruid_namespace_alias() -> None:
+    """把第三方包的 ParserUID 导入映射到当前实际加载的插件包。"""
+    package_root = __package__.rpartition(".")[0]
+    if package_root == "ParserUID" or package_root not in sys.modules:
+        return
+    sys.modules["ParserUID"] = sys.modules[package_root]
+    prefix = f"{package_root}."
+    for module_name, module in tuple(sys.modules.items()):
+        if module_name.startswith(prefix):
+            alias = f"ParserUID.{module_name.removeprefix(prefix)}"
+            sys.modules[alias] = module
+
+
 def _import_parser_class(
     dir_path: Path,
     module_name: str,
@@ -114,6 +128,9 @@ def _import_parser_class(
     init_file = dir_path / "__init__.py"
     if not init_file.is_file():
         return None
+
+    if module_name.startswith(THIRDPARTY_MODULE_PREFIX):
+        _install_parseruid_namespace_alias()
 
     try:
         spec = importlib.util.spec_from_file_location(
@@ -185,7 +202,7 @@ async def load_registry() -> RegistrySnapshot:
                 continue
 
             if is_thirdparty:
-                module_prefix = "parseruid_thirdparty"
+                module_prefix = THIRDPARTY_MODULE_PREFIX
             else:
                 module_prefix = f"{__package__.rpartition('.')[0]}.parsers"
             parser_cls = _import_parser_class(
