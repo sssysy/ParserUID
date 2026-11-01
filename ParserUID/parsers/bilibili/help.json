@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "name": "b站登录",
+      "desc": "扫码登录 B 站 TV 端并保存凭证",
+      "eg": "b站登录",
+      "highlight": 6,
+      "need_ck": false,
+      "need_sk": false,
+      "need_admin": false
+    }
+  ]
+}

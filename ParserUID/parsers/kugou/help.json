@@ -1,0 +1,31 @@
+{
+  "data": [
+    {
+      "name": "酷狗登录",
+      "desc": "通过酷狗官方二维码登录普通版",
+      "eg": "酷狗登录",
+      "highlight": 6,
+      "need_ck": false,
+      "need_sk": false,
+      "need_admin": false
+    },
+    {
+      "name": "酷狗概念版登录",
+      "desc": "通过酷狗官方二维码登录概念版",
+      "eg": "酷狗概念版登录",
+      "highlight": 6,
+      "need_ck": false,
+      "need_sk": false,
+      "need_admin": false
+    },
+    {
+      "name": "酷狗状态",
+      "desc": "查看凭据状态及当前 API 模式",
+      "eg": "酷狗状态",
+      "highlight": 6,
+      "need_ck": false,
+      "need_sk": false,
+      "need_admin": false
+    }
+  ]
+}

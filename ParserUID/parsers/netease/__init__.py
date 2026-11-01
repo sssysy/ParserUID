@@ -7,7 +7,7 @@ from gsuid_core.bot import Bot
 from gsuid_core.models import Event
 
 from .parser import NeteaseParser
-from .scanner import LOGIN_COMMAND, LOGOUT_COMMAND, logout, start_login
+from .scanner import logout, start_login
 from ...utils.exceptions import ParseException, sanitize_error_text
 
 PARSER = NeteaseParser
@@ -15,7 +15,7 @@ PARSER = NeteaseParser
 sv = SV("网易云音乐解析器命令", pm=0, area="ALL")
 
 
-@sv.on_command(LOGIN_COMMAND, block=True)
+@sv.on_command(("网易云登录", "nlogin"), block=True)
 async def netease_login(bot: Bot, ev: Event) -> None:
     """生成网易云扫码二维码，支持 nlogin（PC 客户端模式）与 nlogin web（网页模式）。"""
     arg = ev.text.strip().lower()
@@ -27,7 +27,7 @@ async def netease_login(bot: Bot, ev: Event) -> None:
         await bot.send(f"网易云登录失败：{detail}")
 
 
-@sv.on_fullmatch(LOGOUT_COMMAND, block=True)
+@sv.on_fullmatch(("网易云退出", "nlogout"), block=True)
 async def netease_logout(bot: Bot, ev: Event) -> None:
     """清除本机保存的网易云登录凭据。"""
     await logout(bot, ev)

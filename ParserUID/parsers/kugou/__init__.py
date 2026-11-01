@@ -21,7 +21,6 @@ from .auth import (
     save_credential,
     check_qr_session,
     create_qr_session,
-    remove_credential,
 )
 from .crypto import LITE_PROFILE, STANDARD_PROFILE, ApiProfile, new_guid, mid_from_guid
 from .parser import KugouParser
@@ -46,14 +45,14 @@ def _track(coro: object) -> None:
     task.add_done_callback(_login_tasks.discard)
 
 
-@sv.on_fullmatch(("酷狗登录", "kugoulogin"), block=True)
+@sv.on_fullmatch(("酷狗登录", "kglogin"), block=True)
 async def kugou_login(bot: Bot, ev: Event) -> None:
     """通过酷狗官方二维码登录普通版。"""
     del ev
     await _start_login(bot, concept=False)
 
 
-@sv.on_fullmatch(("酷狗概念版登录", "kugoulitelogin"), block=True)
+@sv.on_fullmatch(("酷狗概念版登录", "kglitelogin"), block=True)
 async def kugou_lite_login(bot: Bot, ev: Event) -> None:
     """通过酷狗官方二维码登录概念版。"""
     del ev
@@ -130,16 +129,7 @@ async def _refresh_saved_device(parser: KugouParser, concept: bool, credential: 
         pass
 
 
-@sv.on_fullmatch(("酷狗退出", "kugoulogout"), block=True)
-async def kugou_logout(bot: Bot, ev: Event) -> None:
-    """清除普通版和概念版的本地 Cookie。"""
-    del ev
-    await asyncio.to_thread(remove_credential, "standard")
-    await asyncio.to_thread(remove_credential, "lite")
-    await bot.send("酷狗普通版和概念版登录 Cookie 已清除")
-
-
-@sv.on_fullmatch(("酷狗状态", "kugoustatus"), block=True)
+@sv.on_fullmatch(("酷狗状态", "kgstatus"), block=True)
 async def kugou_status(bot: Bot, ev: Event) -> None:
     """显示两套 Cookie 的配置/文件状态。"""
     del ev

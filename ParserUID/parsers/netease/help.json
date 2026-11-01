@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "name": "网易云登录",
+      "desc": "扫码登录网易云音乐账号",
+      "eg": "网易云登录",
+      "highlight": 6,
+      "need_ck": false,
+      "need_sk": false,
+      "need_admin": false
+    },
+    {
+      "name": "网易云退出",
+      "desc": "清除本机保存的网易云凭据",
+      "eg": "网易云退出",
+      "highlight": 6,
+      "need_ck": false,
+      "need_sk": false,
+      "need_admin": false
+    }
+  ]
+}

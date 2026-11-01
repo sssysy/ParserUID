@@ -26,7 +26,7 @@ async def _command_parser() -> tuple[BilibiliParser, bool]:
     return BilibiliParser(), True
 
 
-@sv.on_fullmatch("blogin", block=True)
+@sv.on_fullmatch(("blogin", "b站登录"), block=True)
 async def bilibili_login(bot: Bot, ev: Event) -> None:
     """通过 B 站 TV 端二维码登录并保存可续期凭证。"""
     del ev

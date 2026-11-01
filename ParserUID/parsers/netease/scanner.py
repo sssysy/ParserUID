@@ -15,8 +15,6 @@ from .auth import QrSession, poll_qr_login, build_qr_image, create_qr_session, r
 from .parser import NeteaseParser
 from ...utils.exceptions import ParseException, sanitize_error_text
 
-LOGIN_COMMAND = "nlogin"
-LOGOUT_COMMAND = "nlogout"
 _login_lock = asyncio.Lock()
 _login_tasks: set[asyncio.Task[None]] = set()
 
