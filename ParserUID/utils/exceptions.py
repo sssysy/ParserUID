@@ -59,6 +59,10 @@ class DownloadException(ParseException):
     """通用多媒体下载异常。"""
 
 
+class MusicCardException(ParseException):
+    """QQ 音乐卡片签名或发送异常。"""
+
+
 def sanitize_error_text(text: str, *, hide_local_paths: bool = False) -> str:
     """清理异常文本，移除 URL 查询参数和常见凭据。"""
     normalized = " ".join(_CONTROL_RE.sub(" ", text).split())

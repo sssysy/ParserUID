@@ -20,6 +20,7 @@ from .share import (
 from ...sender import ContentItem
 from ...utils.models import Platform
 from ...utils.exceptions import ParseException
+from ...utils.music_card import MusicCardInfo
 
 MOBILE_UA = (
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
@@ -58,7 +59,17 @@ class QSMusicParser(BaseParser):
                 proxy=self.proxy,
             )
 
-        audio = self.create_audio_content(loader=load_audio, duration=duration)
+        audio = self.create_audio_content(
+            loader=load_audio,
+            duration=duration,
+            music_card=MusicCardInfo(
+                audio_url=track.url,
+                source_url=share_url,
+                title=title,
+                artist=artist,
+                cover_url=cover or "",
+            ),
+        )
         author = self.create_author(
             artist,
             avatar,

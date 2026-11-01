@@ -20,6 +20,7 @@ from .request import KugouRequest
 from ...sender import ContentItem
 from ...utils.models import Platform
 from ...utils.exceptions import ParseException
+from ...utils.music_card import MusicCardInfo
 
 QUALITY_LABELS = {
     "128": "标准 128K",
@@ -119,7 +120,17 @@ class KugouParser(BaseParser):
                 fallback_urls=audio.backup_urls,
             )
 
-        content = self.create_audio_content(loader=load_audio, duration=meta.duration)
+        content = self.create_audio_content(
+            loader=load_audio,
+            duration=meta.duration,
+            music_card=MusicCardInfo(
+                audio_url=audio.url,
+                source_url=source_url,
+                title=meta.title,
+                artist=meta.singer,
+                cover_url=meta.cover_url or "",
+            ),
+        )
         items: list[ContentItem] = [content]
         if lyric:
             items.append(self.create_text_content(lyric))

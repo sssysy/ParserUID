@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from collections.abc import Callable, Awaitable
 
 from ..sender import MediaKind, ContentItem, ResultSummary
+from .music_card import MusicCardInfo
 from ..render.models import (
     PreviewCard,
 )
@@ -134,9 +135,11 @@ class AudioContent(MediaContent):
         loader: PathLoader | None = None,
         *,
         duration: float = 0.0,
+        music_card: MusicCardInfo | None = None,
     ) -> None:
         super().__init__(path, loader)
         self._duration = duration
+        self.music_card = music_card
 
     def kind(self) -> Literal["audio"]:
         return "audio"

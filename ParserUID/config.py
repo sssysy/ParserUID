@@ -50,6 +50,11 @@ CONFIG_DEFAULT: dict[str, GSC] = {
         desc="开启后音乐解析结果以语音发送；关闭后以文件发送。",
         data=True,
     ),
+    "send_qq_music_card": GsBoolConfig(
+        title="启用 QQ 音乐卡片发送",
+        desc="仅限 OneBotUID 适配器连接可用",
+        data=False,
+    ),
     "send_trigger_feedback": GsBoolConfig(
         title="解析触发文字反馈",
         desc="开启后，解析链接命中并进入后台解析时，发送文字反馈。",
@@ -229,6 +234,11 @@ def parse_result_enabled() -> bool:
 def music_as_voice_enabled() -> bool:
     """返回音乐解析结果是否以语音形式发送。"""
     return bool(parser_config.get_config("send_music_as_voice").data)
+
+
+def qq_music_card_enabled() -> bool:
+    """返回是否尝试用 QQ 音乐卡片替代解析出的音频。"""
+    return bool(parser_config.get_config("send_qq_music_card").data)
 
 
 def trigger_feedback_enabled() -> bool:

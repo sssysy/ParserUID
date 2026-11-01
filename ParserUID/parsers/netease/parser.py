@@ -18,6 +18,7 @@ from .request import NeteaseClient
 from ...sender import ContentItem
 from ...utils.models import Platform
 from ...utils.exceptions import ParseException
+from ...utils.music_card import MusicCardInfo
 
 MEDIA_HEADERS = {
     "Referer": "https://music.163.com/",
@@ -63,7 +64,17 @@ class NeteaseParser(BaseParser):
                 proxy=self.proxy,
             )
 
-        item = self.create_audio_content(loader=load_audio, duration=song.duration)
+        item = self.create_audio_content(
+            loader=load_audio,
+            duration=song.duration,
+            music_card=MusicCardInfo(
+                audio_url=audio.url,
+                source_url=song.source_url,
+                title=song.title,
+                artist=song.author.name,
+                cover_url=song.cover_url or "",
+            ),
+        )
         trial_note = f" | 试听: {audio.trial_seconds} 秒" if audio.trial_seconds > 0 else ""
         extra = f"音质: {audio.display_quality} | 格式: {audio.extension} | 时长: {song.duration_text}{trial_note}"
         if song.album:

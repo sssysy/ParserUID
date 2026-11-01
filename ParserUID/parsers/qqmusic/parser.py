@@ -23,6 +23,7 @@ from ...sender import ContentItem
 from ...utils.models import Platform
 from ...render.models import Metric
 from ...utils.exceptions import ParseException, DownloadException
+from ...utils.music_card import MusicCardInfo
 
 _MEDIA_HEADERS = {"Referer": "https://y.qq.com/", "User-Agent": WEB_UA}
 _ENCRYPTED_SUFFIXES = frozenset({".mflac", ".mflac0", ".mgg", ".mgg1", ".mmp4"})
@@ -85,7 +86,17 @@ class QQMusicParser(BaseParser):
             return await self._download_audio(track, audio)
 
         contents: list[ContentItem] = [
-            self.create_audio_content(loader=load_audio, duration=max(0.0, float(track.interval)))
+            self.create_audio_content(
+                loader=load_audio,
+                duration=max(0.0, float(track.interval)),
+                music_card=MusicCardInfo(
+                    audio_url=audio.url,
+                    source_url=f"https://y.qq.com/n/ryqq/songDetail/{track.mid}",
+                    title=track.title or track.name or "未知歌曲",
+                    artist=" / ".join(singer.name for singer in track.singer if singer.name) or "未知歌手",
+                    cover_url=_album_cover(track) or "",
+                ),
+            )
         ]
         if lyric:
             contents.append(self.create_text_content(lyric))

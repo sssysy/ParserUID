@@ -18,13 +18,16 @@ from .config import (
     parser_config,
     default_skin_pack,
     max_file_size_bytes,
+    qq_music_card_enabled,
     music_as_voice_enabled,
     max_audio_duration_seconds,
     max_video_duration_seconds,
 )
 from .utils.ffmpeg import probe_duration
+from .utils.onebot import send_music_card, onebot_connection_available
 from .render.models import PreviewCard
 from .utils.exceptions import ResourceLimitException, sanitize_error_text
+from .utils.music_card import MusicCardInfo, sign_music_card
 
 _CURRENT_SEND_PROXY: ContextVar[str | None] = ContextVar("parser_uid_send_proxy", default=None)
 
@@ -73,6 +76,11 @@ class MediaContentProtocol(ContentProtocol, Protocol):
 @runtime_checkable
 class NamedMediaProtocol(Protocol):
     name: str | None
+
+
+@runtime_checkable
+class MusicCardContentProtocol(Protocol):
+    music_card: MusicCardInfo | None
 
 
 ContentItem: TypeAlias = TextContentProtocol | MediaContentProtocol
@@ -152,11 +160,20 @@ async def send_parse_result(
 ) -> bool:
     """按输入顺序发送解析结果；返回是否已交给 Core 发送队列。"""
     _validate_contents(contents)
+    if forward_threshold < 0:
+        raise ValueError("合并转发阈值不能为负数")
     if not contents:
         logger.info("[Parser·发送] 解析结果为空，不发送")
         return False
-    if forward_threshold < 0:
-        raise ValueError("合并转发阈值不能为负数")
+
+    if _has_music_card_candidate(contents, bot.ev):
+        return await _send_with_music_cards(
+            bot,
+            contents,
+            summary=summary,
+            forward_threshold=forward_threshold,
+            supports_node=supports_node,
+        )
 
     should_merge = forward_threshold > 0 and len(contents) >= forward_threshold
     if should_merge and not supports_node:
@@ -181,6 +198,95 @@ async def send_parse_result(
         failure_sent = await _send(bot, MessageSegment.text("\n".join(failures)))
         sent = failure_sent or sent
     return sent
+
+
+def _has_music_card_candidate(
+    contents: Sequence[ContentItem],
+    ev: Event,
+) -> bool:
+    if not qq_music_card_enabled() or not onebot_connection_available(ev):
+        return False
+    for item in contents:
+        if item.kind() == "audio" and isinstance(item, MusicCardContentProtocol):
+            if item.music_card is not None:
+                return True
+    return False
+
+
+async def _send_with_music_cards(
+    bot: Bot,
+    contents: Sequence[ContentItem],
+    *,
+    summary: ResultSummary | None,
+    forward_threshold: int,
+    supports_node: bool,
+) -> bool:
+    sent = False
+    failures: list[str] = []
+    pending: list[Message] = []
+    pending_count = 0
+
+    async def flush_pending() -> None:
+        nonlocal sent, pending_count
+        if not pending:
+            return
+        if forward_threshold > 0 and pending_count >= forward_threshold:
+            if supports_node:
+                sent = await _send(bot, [MessageSegment.node(pending)]) or sent
+            else:
+                fallback = build_text_fallback(summary, pending_count)
+                sent = await _send(bot, MessageSegment.text(fallback)) or sent
+        else:
+            sent = await _send(bot, pending) or sent
+        pending.clear()
+        pending_count = 0
+
+    for item in contents:
+        if item.kind() == "audio" and isinstance(item, MusicCardContentProtocol):
+            info = item.music_card
+            if info is not None:
+                try:
+                    signed_json = await sign_music_card(info)
+                except Exception as exc:
+                    logger.warning(f"[Parser·音乐卡片] 签名失败，回退音频 | error_type={type(exc).__name__}")
+                else:
+                    await flush_pending()
+                    if await send_music_card(bot.ev, signed_json):
+                        sent = True
+                        continue
+
+        built = await _build_single_content(item)
+        pending.extend(built.segments)
+        failures.extend(built.failures)
+        pending_count += 1
+
+    await flush_pending()
+    if failures:
+        failure_sent = await _send(bot, MessageSegment.text("\n".join(failures)))
+        sent = failure_sent or sent
+    return sent
+
+
+@dataclass(frozen=True, slots=True)
+class _BuiltContent:
+    segments: tuple[Message, ...] = ()
+    failures: tuple[str, ...] = ()
+
+
+async def _build_single_content(item: ContentItem) -> _BuiltContent:
+    kind = item.kind()
+    if kind == "text":
+        if not isinstance(item, TextContentProtocol):
+            raise TypeError("文本内容必须提供 text()")
+        text = item.text()
+        return _BuiltContent(segments=(MessageSegment.text(text),) if text else ())
+    if not isinstance(item, MediaContentProtocol):
+        raise TypeError("媒体内容必须提供 path()")
+    built = await _build_media_segment(item, kind)
+    return _BuiltContent(
+        segments=(built.segment,) if built.segment is not None else (),
+        failures=(built.failure,) if built.failure is not None else (),
+    )
 
 
 def _validate_contents(contents: Sequence[ContentItem]) -> None:

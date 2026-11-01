@@ -21,6 +21,7 @@ from .models import (
 from ...sender import ContentItem
 from ...utils.models import Platform
 from ...utils.exceptions import ParseException
+from ...utils.music_card import MusicCardInfo
 
 SHARE_API = "https://parse-api.sokoko.org/api/kuwo/song"
 BODIAN_INFO_API = "https://bd-api.kuwo.cn/api/service/music/info"
@@ -78,7 +79,17 @@ class KuwoParser(BaseParser):
                 proxy=self.proxy,
             )
 
-        audio = self.create_audio_content(loader=load_audio, duration=duration)
+        audio = self.create_audio_content(
+            loader=load_audio,
+            duration=duration,
+            music_card=MusicCardInfo(
+                audio_url=audio_url,
+                source_url=f"https://www.kuwo.cn/play_detail/{rid}",
+                title=title,
+                artist=artist,
+                cover_url=cover_url or "",
+            ),
+        )
         author = self.create_author(artist, avatar_url)
         extra_info = _track_info(duration, album, quality)
 
@@ -200,7 +211,17 @@ class KuwoParser(BaseParser):
                 proxy=self.proxy,
             )
 
-        audio = self.create_audio_content(loader=load_audio, duration=duration)
+        audio = self.create_audio_content(
+            loader=load_audio,
+            duration=duration,
+            music_card=MusicCardInfo(
+                audio_url=audio_url,
+                source_url=searched.group(0),
+                title=title,
+                artist=artist,
+                cover_url=cover_url or "",
+            ),
+        )
         await self.send_info(
             title=title,
             card_type="common",

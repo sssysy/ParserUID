@@ -40,6 +40,7 @@ from ..render.models import (
 )
 from ..utils.downloader import Downloader, download_image
 from ..utils.exceptions import ParseException, RedirectException
+from ..utils.music_card import MusicCardInfo
 
 DescriptionSink = Callable[[PreviewCard], Awaitable[None]]
 HandlerFunc = Callable[[re.Match[str]], Coroutine[object, object, Sequence[ContentItem]]]
@@ -445,8 +446,9 @@ class BaseParser:
         loader: PathLoader | None = None,
         *,
         duration: float = 0.0,
+        music_card: MusicCardInfo | None = None,
     ) -> AudioContent:
-        return AudioContent(path, loader, duration=duration)
+        return AudioContent(path, loader, duration=duration, music_card=music_card)
 
     def create_file_content(
         self,
