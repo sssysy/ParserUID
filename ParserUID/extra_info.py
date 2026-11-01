@@ -8,7 +8,6 @@ from pathlib import Path
 
 from PIL import Image
 
-from gsuid_core.data_store import get_res_path
 from gsuid_core.status.plugin_status import register_status
 
 from .parsers.config import ParserManifest, load_parser_user_config
@@ -17,6 +16,7 @@ from .utils.registry import (
     get_builtin_parsers_dir,
     get_thirdparty_parsers_dir,
 )
+from .render.registry import scan_skin_packs
 
 _ICON_PATH = Path(__file__).resolve().parent.parent / "ICON.png"
 _CACHE_TTL_SECONDS = 5.0
@@ -45,21 +45,7 @@ def _scan_parser_stats() -> tuple[int, int]:
 
 
 def _scan_available_skins_count() -> int:
-    builtin_skin_root = Path(__file__).resolve().parent / "render" / "pack"
-    thirdparty_skin_root = get_res_path("ParserUID") / "thirdparty" / "renderskinpacks"
-    skins: set[str] = set()
-
-    for root_dir in (builtin_skin_root, thirdparty_skin_root):
-        if not root_dir.is_dir():
-            continue
-        for child in sorted(root_dir.iterdir()):
-            if not child.is_dir() or child.name.startswith((".", "_")):
-                continue
-            manifest_file = child / "manifest.json"
-            if manifest_file.is_file():
-                skins.add(child.name)
-
-    return max(len(skins), 1)
+    return max(len(scan_skin_packs()), 1)
 
 
 async def get_registered_parsers_count() -> int:

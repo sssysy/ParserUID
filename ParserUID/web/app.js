@@ -1203,22 +1203,26 @@
       item.setAttribute("aria-checked", skin.name === data.current ? "true" : "false");
       item.dataset.name = skin.name;
       const copy = createElement("span", "skin-copy");
-      copy.append(
-        createElement("strong", "", skin.display_name),
+      const meta = createElement("span", "skin-meta");
+      const source = skin.source === "thirdparty" ? "第三方" : "内置";
+      meta.append(
+        createElement("span", `skin-source skin-source--${skin.source}`, source),
+        createElement("span", "", skin.version ? `v${skin.version}` : "未声明版本"),
       );
+      copy.append(createElement("strong", "", skin.display_name), meta);
       item.append(copy, createElement("span", "radio-indicator"));
       item.addEventListener("click", () => selectSkin(skin.name));
       refs.skinList.append(item);
     }
     refs.skinMessage.textContent =
-      data?.message || "当前仅支持内置默认皮肤。";
+      data?.message || "未发现可用皮肤包。";
   }
 
   let skinData = {
     current: "default",
-    skins: [{ name: "default", display_name: "默认皮肤" }],
+    skins: [{ name: "default", display_name: "默认皮肤", version: "", source: "builtin" }],
     editable: false,
-    message: "皮肤包切换功能预留，当前仅支持内置默认皮肤。",
+    message: "正在读取皮肤设置...",
   };
 
   async function selectSkin(name) {
@@ -1227,8 +1231,15 @@
       showSnackbar("当前版本暂不支持切换皮肤");
       return;
     }
+    const skin = skinData.skins.find((item) => item.name === name);
+    if (
+      skin?.source === "thirdparty" &&
+      !window.confirm("第三方皮肤包包含受信任的模板和 Python 代码，确认切换并启用？")
+    ) {
+      return;
+    }
     try {
-      await apiPost("skin", { name });
+      await apiPost("skin", { name, confirmed: skin?.source === "thirdparty" });
       skinData = { ...skinData, current: name };
       renderSkins(skinData);
       refs.skinMessage.textContent = `当前使用 ${skinData.skins.find((skin) => skin.name === name)?.display_name || name}。`;

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import io
-import json
+import sys
 import asyncio
 import inspect
 import importlib
 import importlib.util
+from types import ModuleType
 from typing import Final
 from pathlib import Path
-from dataclasses import dataclass
 from collections.abc import Mapping, Callable, Awaitable
 
 import httpx
@@ -31,6 +31,12 @@ from .helpers import (
     encode_png,
     file_digest,
 )
+from .registry import (
+    SkinPackage,
+    SkinManifest,
+    resolve_skin_pack,
+    load_skin_manifest as load_skin_manifest,
+)
 from ..utils.downloader import download_image
 from ..utils.exceptions import DownloadException
 
@@ -51,63 +57,6 @@ PREVIEW_DARK_BACKGROUND: Final = (8, 9, 11)
 PREVIEW_LIGHT_DOT: Final = (148, 163, 184)
 PREVIEW_DARK_DOT: Final = (226, 232, 240)
 _RENDER_VERSION: Final = "18"
-_SKIN_NAME_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
-
-
-@dataclass(frozen=True, slots=True)
-class SkinManifest:
-    name: str
-    display_name: str
-    templates: Mapping[str, str]
-
-
-def _manifest_string(raw: Mapping[str, object], key: str) -> str:
-    if key not in raw:
-        raise ValueError(f"皮肤 manifest 缺少字段：{key}")
-    value = raw[key]
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"皮肤 manifest 字段必须是字符串：{key}")
-    return value.strip()
-
-
-def _manifest_templates(raw: Mapping[str, object]) -> Mapping[str, str]:
-    if "templates" not in raw:
-        raise ValueError("皮肤 manifest 缺少 templates")
-    value = raw["templates"]
-    if not isinstance(value, dict):
-        raise ValueError("皮肤 manifest 的 templates 必须是对象")
-    templates: dict[str, str] = {}
-    for kind, template_name in value.items():
-        if not isinstance(kind, str) or not isinstance(template_name, str):
-            raise ValueError("皮肤 templates 的键和值必须是字符串")
-        relative = Path(template_name)
-        if (
-            not template_name
-            or relative.is_absolute()
-            or relative.suffix.lower() != ".html"
-            or ".." in relative.parts
-            or len(relative.parts) != 1
-        ):
-            raise ValueError(f"皮肤模板必须是目录内的 .html 文件名：{template_name}")
-        templates[kind] = template_name
-    if "default" not in templates:
-        raise ValueError("皮肤 templates 必须包含 default")
-    return templates
-
-
-def load_skin_manifest(pack_dir: Path) -> SkinManifest:
-    """Read and validate one skin manifest."""
-    manifest_file = pack_dir / "manifest.json"
-    if not manifest_file.is_file():
-        raise ValueError(f"皮肤缺少 manifest.json：{pack_dir.name}")
-    raw: object = json.loads(manifest_file.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(f"皮肤 manifest 必须是对象：{pack_dir.name}")
-    return SkinManifest(
-        name=_manifest_string(raw, "name"),
-        display_name=_manifest_string(raw, "display_name"),
-        templates=_manifest_templates(raw),
-    )
 
 
 def _template_candidates(card: PreviewCard, manifest: SkinManifest) -> tuple[str, ...]:
@@ -136,27 +85,30 @@ def _skin_environment(pack_dir: Path) -> Environment:
     )
 
 
-def _skin_name_is_safe(skin_name: str) -> bool:
-    return bool(skin_name) and all(char in _SKIN_NAME_ALLOWED for char in skin_name)
-
-
 async def _prepare_context(
     card: PreviewCard,
-    pack_dir: Path,
-    skin_name: str,
+    package: SkinPackage,
     *,
     proxy: str | None,
 ) -> Mapping[str, object]:
     """Load optional context.py data preparation; HTML stays in Jinja templates."""
+    pack_dir = package.pack_dir
     context_file = pack_dir / "context.py"
     if not context_file.is_file():
         return {"card": card}
-    module_name = f"{__package__}.pack.{skin_name}.context"
+    if package.source == "thirdparty":
+        _ensure_external_skin_package(package)
+    module_name = f"{__package__}.pack.{package.name}.context"
     spec = importlib.util.spec_from_file_location(module_name, context_file)
     if spec is None or spec.loader is None:
         raise ValueError(f"无法加载皮肤 context.py：{pack_dir.name}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        del sys.modules[module_name]
+        raise
     if "prepare_context" not in module.__dict__:
         raise ValueError(f"皮肤 context.py 缺少 prepare_context：{pack_dir.name}")
     function = module.__dict__["prepare_context"]
@@ -165,10 +117,31 @@ async def _prepare_context(
     accepts_proxy = "proxy" in inspect.signature(function).parameters
     prepare: Callable[..., Awaitable[Mapping[str, object]] | Mapping[str, object]] = function
     if inspect.iscoroutinefunction(prepare):
-        return await prepare(card, proxy=proxy) if accepts_proxy else await prepare(card)
-    blocking = asyncio.to_thread(prepare, card, proxy=proxy) if accepts_proxy else asyncio.to_thread(prepare, card)
-    result = await blocking
-    return await result if inspect.isawaitable(result) else result
+        result = await prepare(card, proxy=proxy) if accepts_proxy else await prepare(card)
+    else:
+        blocking = asyncio.to_thread(prepare, card, proxy=proxy) if accepts_proxy else asyncio.to_thread(prepare, card)
+        result = await blocking
+        if inspect.isawaitable(result):
+            result = await result
+    if not isinstance(result, Mapping):
+        raise ValueError(f"prepare_context 必须返回映射：{pack_dir.name}")
+    return result
+
+
+def _ensure_external_skin_package(package: SkinPackage) -> None:
+    """为第三方皮肤建立受控包命名空间，支持 context.py 的相对导入。"""
+    module_name = f"{__package__}.pack.{package.name}"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        setattr(existing, "__path__", [str(package.pack_dir)])
+        return
+    module: ModuleType = ModuleType(module_name)
+    setattr(module, "__path__", [str(package.pack_dir)])
+    setattr(module, "__package__", module_name)
+    sys.modules[module_name] = module
+    parent = sys.modules.get(f"{__package__}.pack")
+    if parent is not None:
+        setattr(parent, package.name, module)
 
 
 async def _download_asset_safely(
@@ -287,16 +260,9 @@ async def ensure_card_assets(card: PreviewCard, *, proxy: str | None = None) -> 
 
 
 def load_skin_pack(skin_name: str) -> tuple[Path, SkinManifest, Environment]:
-    """Load one skin directory, manifest, and Jinja environment."""
-    if not _skin_name_is_safe(skin_name):
-        raise ValueError(f"不支持的皮肤：{skin_name}")
-    pack_dir = PACK_DIR / skin_name
-    if not pack_dir.is_dir():
-        raise ValueError(f"不支持的皮肤：{skin_name}")
-    manifest = load_skin_manifest(pack_dir)
-    if manifest.name != skin_name:
-        raise ValueError(f"皮肤目录名与 manifest.name 不一致：{skin_name} != {manifest.name}")
-    return pack_dir, manifest, _skin_environment(pack_dir)
+    """加载内置或第三方皮肤目录、manifest 与 Jinja 环境。"""
+    package = resolve_skin_pack(skin_name, builtin_dir=PACK_DIR)
+    return package.pack_dir, package.manifest, _skin_environment(package.pack_dir)
 
 
 def _render_skin_html(
@@ -444,8 +410,11 @@ async def _render_preview(card: PreviewCard, *, skin: str, proxy: str | None) ->
         return path
 
     ready_card = await ensure_card_assets(card, proxy=proxy)
-    pack_dir, manifest, environment = load_skin_pack(skin)
-    context = await _prepare_context(ready_card, pack_dir, skin, proxy=proxy)
+    package = await asyncio.to_thread(resolve_skin_pack, skin, builtin_dir=PACK_DIR)
+    pack_dir = package.pack_dir
+    manifest = package.manifest
+    environment = _skin_environment(pack_dir)
+    context = await _prepare_context(ready_card, package, proxy=proxy)
     html = await asyncio.to_thread(
         _render_skin_html,
         ready_card,

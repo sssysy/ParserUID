@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import asyncio
 from typing import Final, TypedDict
 from pathlib import Path
@@ -11,7 +10,6 @@ from urllib.parse import urlparse
 from pydantic import BaseModel
 
 from gsuid_core.logger import logger
-from gsuid_core.data_store import get_res_path
 from gsuid_core.webconsole.plugin_page import (
     PluginAPI,
     api_ok,
@@ -40,10 +38,9 @@ from .utils.registry import (
     get_builtin_parsers_dir,
     get_thirdparty_parsers_dir,
 )
+from .render.registry import SkinSource, scan_skin_packs
 
 PAGE_DIR: Final = Path(__file__).parent / "web"
-COOKIES_DIR: Final = get_res_path("ParserUID") / "cookies"
-BILIBILI_CREDENTIAL_FILE: Final = "bilibili_credential.json"
 
 register_plugin_page(
     title="解析器设置",
@@ -94,6 +91,8 @@ class ParsersListResponse(TypedDict):
 class SkinItemView(TypedDict):
     name: str
     display_name: str
+    version: str
+    source: SkinSource
 
 
 class SkinsListResponse(TypedDict):
@@ -126,108 +125,11 @@ class SaveAccessListsRequest(BaseModel):
 
 class SaveSkinRequest(BaseModel):
     name: str
+    confirmed: bool = False
 
 
 class SaveProxyRequest(BaseModel):
     value: str
-
-
-class BilibiliCredential(TypedDict):
-    cookie_header: str
-    sessdata: str
-    bili_jct: str
-    dedeuserid: str
-    mid: int
-    access_token: str
-    refresh_token: str
-    expires_at: float
-
-
-def _bilibili_credential_path() -> Path:
-    return COOKIES_DIR / BILIBILI_CREDENTIAL_FILE
-
-
-def _load_bilibili_credential() -> BilibiliCredential | None:
-    path = _bilibili_credential_path()
-    if not path.is_file():
-        return None
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError):
-        logger.warning("[Parser·Web] 哔哩哔哩扫码凭证损坏，忽略")
-        return None
-    if not isinstance(raw, dict):
-        return None
-
-    cookie_parts: list[str] = []
-    sessdata = str(raw.get("sessdata") or "")
-    bili_jct = str(raw.get("bili_jct") or "")
-    dedeuserid = str(raw.get("dedeuserid") or "")
-    if sessdata:
-        cookie_parts.append(f"SESSDATA={sessdata}")
-    if bili_jct:
-        cookie_parts.append(f"bili_jct={bili_jct}")
-    if dedeuserid:
-        cookie_parts.append(f"DedeUserID={dedeuserid}")
-
-    if not cookie_parts:
-        return None
-
-    raw_mid = raw.get("mid")
-    raw_expires = raw.get("expires_at")
-    mid = int(raw_mid) if isinstance(raw_mid, (int, float, str)) and str(raw_mid).isdigit() else 0
-    expires_at = float(raw_expires) if isinstance(raw_expires, (int, float)) else 0.0
-
-    return {
-        "cookie_header": "; ".join(cookie_parts),
-        "sessdata": sessdata,
-        "bili_jct": bili_jct,
-        "dedeuserid": dedeuserid,
-        "mid": mid,
-        "access_token": str(raw.get("access_token") or ""),
-        "refresh_token": str(raw.get("refresh_token") or ""),
-        "expires_at": expires_at,
-    }
-
-
-def _save_bilibili_credential_if_valid(cookie_header: str) -> bool:
-    if not cookie_header.strip():
-        return False
-    values: dict[str, str] = {}
-    for item in cookie_header.replace("\n", "").split(";"):
-        if "=" not in item:
-            continue
-        k, v = item.split("=", 1)
-        if k.strip():
-            values[k.strip()] = v.strip()
-    if "SESSDATA" not in values:
-        return False
-
-    path = _bilibili_credential_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    current: dict[str, object] = {}
-    if path.is_file():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8-sig"))
-            if isinstance(loaded, dict):
-                current = loaded
-        except (OSError, json.JSONDecodeError):
-            current = {}
-
-    payload = {
-        "sessdata": values.get("SESSDATA", ""),
-        "bili_jct": values.get("bili_jct", ""),
-        "dedeuserid": values.get("DedeUserID", ""),
-        "mid": int(current.get("mid") or 0) if isinstance(current.get("mid"), (int, float)) else 0,
-        "access_token": str(current.get("access_token") or ""),
-        "refresh_token": str(current.get("refresh_token") or ""),
-        "expires_at": float(current.get("expires_at") or 0)
-        if isinstance(current.get("expires_at"), (int, float))
-        else 0.0,
-    }
-    content = json.dumps(payload, ensure_ascii=False, indent=2)
-    path.write_text(content, encoding="utf-8")
-    return True
 
 
 def _scan_all_manifests() -> dict[str, ParserManifest]:
@@ -261,7 +163,6 @@ async def _reload_runtime_safely() -> None:
 async def list_parsers() -> object:
     """返回所有解析器的元信息、字段定义与当前配置。"""
     manifests = await asyncio.to_thread(_scan_all_manifests)
-    credential = await asyncio.to_thread(_load_bilibili_credential)
 
     result: list[ParserItemView] = []
     for manifest in manifests.values():
@@ -285,12 +186,6 @@ async def list_parsers() -> object:
                     "configured": is_configured,
                 }
             )
-
-        if manifest.name == "bilibili" and credential is not None:
-            public_values["cookies"] = credential["cookie_header"]
-            for f_item in fields_view:
-                if f_item["key"] == "cookies":
-                    f_item["configured"] = True
 
         result.append(
             {
@@ -320,17 +215,6 @@ async def save_parsers(req: SaveParsersRequest) -> object:
             return api_fail(f"未找到解析器: {item.name}", status=404)
 
         values_to_save = dict(item.values)
-        if item.name == "bilibili" and "cookies" in values_to_save:
-            cookies = values_to_save["cookies"]
-            if isinstance(cookies, str):
-                if cookies.strip():
-                    await asyncio.to_thread(_save_bilibili_credential_if_valid, cookies)
-                else:
-                    path = _bilibili_credential_path()
-                    if path.is_file():
-                        path.unlink(missing_ok=True)
-                del values_to_save["cookies"]
-
         cleaned_values: dict[str, ParserFieldValue] = {}
         for f_name, f_def in manifest.fields.items():
             if f_name in values_to_save:
@@ -392,23 +276,27 @@ async def save_single_parser(name: str, payload: ParserUpdatePayload) -> object:
 @api.get("/parser-settings/skins")
 async def list_skins() -> object:
     """返回可用皮肤包及当前配置。"""
-    skin_root = Path(__file__).parent / "render" / "pack"
-    skins: list[SkinItemView] = []
-    if skin_root.is_dir():
-        for d in sorted(skin_root.iterdir()):
-            if d.is_dir() and not d.name.startswith((".", "_")):
-                disp = "默认皮肤" if d.name == "default" else d.name
-                skins.append({"name": d.name, "display_name": disp})
-
-    if not skins:
-        skins.append({"name": "default", "display_name": "默认皮肤"})
+    packages = await asyncio.to_thread(scan_skin_packs)
+    skins: list[SkinItemView] = [
+        {
+            "name": package.name,
+            "display_name": package.manifest.display_name,
+            "version": package.manifest.version,
+            "source": package.source,
+        }
+        for package in packages.values()
+    ]
 
     current_skin = default_skin_pack()
+    current_available = current_skin in packages
+    message = f"当前使用的卡片皮肤为 {current_skin}。"
+    if not current_available:
+        message = f"当前皮肤 {current_skin} 不可用，请重新选择。"
     response_data: SkinsListResponse = {
         "current": current_skin,
         "skins": skins,
         "editable": True,
-        "message": f"当前使用的卡片皮肤为 {current_skin}。",
+        "message": message,
     }
     return api_ok(response_data)
 
@@ -456,20 +344,17 @@ async def save_proxy(req: SaveProxyRequest) -> object:
 @api.post("/parser-settings/skin")
 async def save_skin(req: SaveSkinRequest) -> object:
     """保存并切换皮肤包。"""
-    skin_root = Path(__file__).parent / "render" / "pack"
-    valid_names: set[str] = {"default"}
-    if skin_root.is_dir():
-        for d in skin_root.iterdir():
-            if d.is_dir() and not d.name.startswith((".", "_")):
-                valid_names.add(d.name)
-
-    if req.name not in valid_names:
+    packages = await asyncio.to_thread(scan_skin_packs)
+    package = packages.get(req.name)
+    if package is None:
         return api_fail(f"不支持的皮肤：{req.name}", status=400)
+    if package.source == "thirdparty" and not req.confirmed:
+        return api_fail("启用第三方皮肤需要确认", status=400)
 
     try:
-        await save_skin_pack(req.name)
+        await save_skin_pack(package.name)
     except OSError as exc:
         logger.warning(f"[Parser·Web] 皮肤设置保存失败 | error_type={type(exc).__name__}")
         return api_fail("皮肤设置保存失败", status=500)
 
-    return api_ok({"current": req.name})
+    return api_ok({"current": package.name, "source": package.source})

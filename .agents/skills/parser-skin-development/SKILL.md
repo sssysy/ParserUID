@@ -25,16 +25,17 @@ description: >
 
 `render_preview(card, skin=...)` 的调用顺序固定为：
 
-1. `runtime.load_skin_pack(skin)` 导入皮肤入口。
+1. 按内容摘要检查渲染缓存。
 2. `runtime.ensure_card_assets(card)` 下载远程封面、头像和正文图片。
-3. 若存在 `context.py`，调用 `prepare_context(card)` 生成 Jinja 上下文。
-4. 按 manifest 顺序选择 HTML 模板并渲染。
-5. `pytakumi` 出图，并按内容摘要缓存 PNG。
+3. `render.registry.resolve_skin_pack(skin)` 定位内置或第三方皮肤包。
+4. 若存在 `context.py`，调用 `prepare_context(card)` 生成 Jinja 上下文。
+5. 按 manifest 顺序选择 HTML 模板并渲染。
+6. `pytakumi` 出图，并按内容摘要缓存 PNG。
 
-当前内置皮肤从 `ParserUID/render/pack/<name>/` 加载。`AGENTS.md` 中列出的
-`data/ParserUID/thirdparty/renderskinpacks/<name>/` 是目标结构；在 runtime
-尚未扩展第三方目录扫描前，只创建该目录不会自动加载。要立即生效，先放在
-`ParserUID/render/pack/<name>/`，并明确告知用户这一限制。
+内置皮肤从 `ParserUID/render/pack/<name>/` 加载，第三方皮肤从
+`data/ParserUID/thirdparty/renderskinpacks/<name>/` 加载。网页配置页会展示
+来源和版本，切换第三方皮肤前要求管理员确认。内置与第三方同名时保留内置，
+第三方包会被拒绝。
 
 ## 皮肤契约
 

@@ -500,10 +500,6 @@ async def _initialize_parser_runtime() -> None:
 
 @on_core_shutdown
 async def _close_parser_runtime() -> None:
-    # 扫码登录可能在等待用户确认，关闭前必须取消受管轮询任务
-    from .parsers.netease.scanner import cancel_login_tasks
-
-    await cancel_login_tasks()
     await close_runtime()
     from .render.runtime import close_render_assets
 

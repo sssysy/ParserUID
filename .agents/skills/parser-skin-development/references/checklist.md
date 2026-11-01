@@ -2,7 +2,8 @@
 
 ## 结构
 
-- [ ] 皮肤位于 `ParserUID/render/pack/<name>/`，或已确认 runtime 支持目标第三方目录。
+- [ ] 内置皮肤位于 `ParserUID/render/pack/<name>/`，第三方皮肤位于
+      `data/ParserUID/thirdparty/renderskinpacks/<name>/`。
 - [ ] `manifest.json` 是合法 JSON，`name` 与目录名一致，`templates.default` 存在。
 - [ ] HTML 位于 Jinja 模板，入口是 `common.html` / `video.html` / `default.html`。
 - [ ] `context.py` 只导出 `prepare_context(card)` 并返回映射，不返回 HTML。

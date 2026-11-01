@@ -15,10 +15,10 @@ ParserUID/render/pack/<name>/
 ```
 
 `AGENTS.md` 约定的第三方皮肤目录是
-`data/ParserUID/thirdparty/renderskinpacks/<name>/`。当前
-`runtime.load_skin_pack()` 只从 `ParserUID/render/pack/` 查找，因此第三方
-目录需要 runtime 增加受限扫描和导入逻辑后才能使用。不要把目标结构写成
-已经可用的事实。
+`data/ParserUID/thirdparty/renderskinpacks/<name>/`。
+`render.registry.scan_skin_packs()` 会同时扫描内置和第三方目录，网页配置页
+只列出通过 manifest、目录名和模板文件校验的皮肤。内置与第三方同名时保留
+内置，第三方包会被拒绝。
 
 ## manifest.json
 
@@ -76,6 +76,16 @@ def prepare_context(card: PreviewCard) -> Mapping[str, object]:
 context.py 的返回值直接传给 `Template.render(**context)`。异步版本同样
 支持，但皮肤不应访问网络。`context.py` 可以导入公共 helpers，不能导入
 解析器包，也不能在 Python 中拼接完整 HTML。
+
+第三方皮肤的 `context.py` 会在受控包命名空间中加载。推荐使用与内置皮肤
+相同的相对导入：
+
+```python
+from ... import helpers
+from ...models import PreviewCard
+```
+
+加载器不会把第三方目录加入全局 `sys.path`。
 
 ## 默认皮肤复用
 

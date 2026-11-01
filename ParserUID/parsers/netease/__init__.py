@@ -5,9 +5,10 @@ from __future__ import annotations
 from gsuid_core.sv import SV
 from gsuid_core.bot import Bot
 from gsuid_core.models import Event
+from gsuid_core.server import on_core_shutdown
 
 from .parser import NeteaseParser
-from .scanner import logout, start_login
+from .scanner import logout, start_login, cancel_login_tasks
 from ...utils.exceptions import ParseException, sanitize_error_text
 
 PARSER = NeteaseParser
@@ -31,3 +32,9 @@ async def netease_login(bot: Bot, ev: Event) -> None:
 async def netease_logout(bot: Bot, ev: Event) -> None:
     """清除本机保存的网易云登录凭据。"""
     await logout(bot, ev)
+
+
+@on_core_shutdown(priority=-10)
+async def _cancel_netease_login_tasks() -> None:
+    """关闭前取消等待用户扫码确认的后台轮询任务。"""
+    await cancel_login_tasks()

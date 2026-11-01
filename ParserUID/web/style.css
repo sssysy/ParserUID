@@ -1393,6 +1393,25 @@ svg {
   font-weight: 500;
 }
 
+.skin-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.75rem;
+}
+
+.skin-source {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--md-sys-color-surface-container-highest);
+}
+
+.skin-source--thirdparty {
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
+}
+
 .radio-indicator {
   position: relative;
   width: 20px;

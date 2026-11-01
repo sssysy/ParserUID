@@ -112,8 +112,13 @@ async def _add_group(
 sv = SV("ParserUID 解析器名单", pm=0, area="ALL")
 
 
-@sv.on_command(("添加解析白名单", "添加解析黑名单"), block=False)
-async def add_parser_access_group(bot: Bot, ev: Event) -> None:
-    """把当前群聊加入指定解析器或全部解析器的白/黑名单。"""
-    kind: AccessMode = "white" if ev.command.endswith("白名单") else "black"
-    await _add_group(bot, ev, kind=kind)
+@sv.on_command("添加解析白名单", block=False)
+async def add_parser_whitelist_group(bot: Bot, ev: Event) -> None:
+    """把当前群聊加入指定解析器或全部解析器的白名单。"""
+    await _add_group(bot, ev, kind="white")
+
+
+@sv.on_command("添加解析黑名单", block=False)
+async def add_parser_blacklist_group(bot: Bot, ev: Event) -> None:
+    """把当前群聊加入指定解析器或全部解析器的黑名单。"""
+    await _add_group(bot, ev, kind="black")
