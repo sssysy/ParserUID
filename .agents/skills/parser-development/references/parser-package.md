@@ -70,6 +70,7 @@ class ExampleParser(BaseParser):
             raise ParseException(f"获取作品失败：HTTP {resp.status_code}")
 
         import msgspec
+
         info = msgspec.json.decode(resp.content, type=ExamplePostInfo)
         author = self.create_author(name=info.author.name, uid=info.author.uid, avatar_url=info.author.avatar_url)
 

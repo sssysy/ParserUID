@@ -18,11 +18,12 @@ ai_alias("雷电将军", ["雷神", "将军", "影", "屑"])
 ai_alias("纳西妲", ["草神", "小草神"])
 
 # 2. 注册知识库
-ai_entity(KnowledgePoint(
-    id="myplugin_intro",
-    plugin="MyPlugin",
-    title="MyPlugin 插件介绍",
-    content="""
+ai_entity(
+    KnowledgePoint(
+        id="myplugin_intro",
+        plugin="MyPlugin",
+        title="MyPlugin 插件介绍",
+        content="""
 # MyPlugin 使用指南
 
 ## 命令列表
@@ -34,16 +35,20 @@ ai_entity(KnowledgePoint(
 1. 需要先绑定账号才能使用查询功能
 2. 每日查询上限为100次
 """,
-    tags=["帮助", "命令", "MyPlugin"],
-))
+        tags=["帮助", "命令", "MyPlugin"],
+    )
+)
+
 
 # 3. 权限校验函数
 async def check_bound(ev: Event) -> tuple[bool, str]:
     """检查用户是否已绑定账号"""
     from my_plugin.database import is_user_bound
+
     if await is_user_bound(ev.user_id):
         return True, ""
     return False, "⚠️ 请先绑定账号：发送 /bind <你的UID>"
+
 
 async def check_admin(ev: Event) -> tuple[bool, str]:
     """检查是否管理员"""
@@ -52,7 +57,9 @@ async def check_admin(ev: Event) -> tuple[bool, str]:
         return True, ""
     return False, "⚠️ 此工具仅管理员可用"
 
+
 # 4. 注册 AI 工具
+
 
 # 简单工具（无上下文）
 @ai_tools(category="default")
@@ -136,6 +143,7 @@ translator = create_agent(
 3. 专有名词保持原样""",
 )
 
+
 async def translate_to_english(text: str) -> str:
     return await translator.run(user_message=text)
 
@@ -159,6 +167,7 @@ code_reviewer = create_agent(
 ## 改进建议
 [具体建议]""",
 )
+
 
 async def review_code(code: str, bot, ev) -> str:
     return await code_reviewer.run(
@@ -184,6 +193,7 @@ from my_plugin import ai_tools  # noqa: F401
 
 # 注册插件命令
 sv = SV("我的插件")
+
 
 @sv.on_fullmatch("/help")
 async def show_help(bot, ev):

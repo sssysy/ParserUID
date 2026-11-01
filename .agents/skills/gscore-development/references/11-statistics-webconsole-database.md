@@ -67,7 +67,10 @@ FastAPI 路由，全部走鉴权依赖：
 ```python
 from fastapi import APIRouter, Depends
 from gsuid_core.webconsole.auth_api import require_auth
+
 app = APIRouter()
+
+
 @app.get("/api/example")
 async def example(_user: Dict = Depends(require_auth)): ...
 ```

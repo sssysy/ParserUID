@@ -55,8 +55,8 @@ POSIX 上父进程把 SIGTERM 转发给子进程。父进程只转发第二次�
 
 ```python
 def on_core_start_before(func=None, /, priority: int = 0): ...  # WS 前阻塞，优先级升序分组并发
-def on_core_start(func=None, /, priority: int = 0): ...         # WS 后台异步
-def on_core_shutdown(func=None, /, priority: int = 0): ...      # 关闭
+def on_core_start(func=None, /, priority: int = 0): ...  # WS 后台异步
+def on_core_shutdown(func=None, /, priority: int = 0): ...  # 关闭
 ```
 
 > **优先级语义**：数值**越小越先执行**；同优先级 `asyncio.gather` 并发。`on_core_start_before`

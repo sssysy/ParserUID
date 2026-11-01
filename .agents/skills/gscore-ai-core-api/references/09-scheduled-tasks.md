@@ -39,22 +39,22 @@ from gsuid_core.ai_core.scheduled_task import AIScheduledTask
 
 ```python
 class AIScheduledTask(SQLModel, table=True):
-    task_id: str                    # 任务ID
-    bot_id: str                     # Bot ID
-    user_id: str                    # 用户ID
-    group_id: Optional[str]         # 群组ID
-    task_type: str                  # "once" 或 "interval"
-    task_prompt: str                # 任务描述
+    task_id: str  # 任务ID
+    bot_id: str  # Bot ID
+    user_id: str  # 用户ID
+    group_id: Optional[str]  # 群组ID
+    task_type: str  # "once" 或 "interval"
+    task_prompt: str  # 任务描述
     trigger_time: Optional[datetime]  # 一次性任务的触发时间
-    interval_seconds: Optional[int]   # 循环任务的间隔秒数
-    max_executions: Optional[int]     # 最大执行次数
-    current_executions: Optional[int] # 已执行次数
-    status: str                     # "pending", "paused", "executed", "failed", "cancelled"
-    persona_name: Optional[str]     # Persona 名称
-    session_id: Optional[str]       # Session ID
-    next_run_time: Optional[datetime] # 下次执行时间
-    result: Optional[str]           # 上次执行结果
-    error_message: Optional[str]    # 错误信息
+    interval_seconds: Optional[int]  # 循环任务的间隔秒数
+    max_executions: Optional[int]  # 最大执行次数
+    current_executions: Optional[int]  # 已执行次数
+    status: str  # "pending", "paused", "executed", "failed", "cancelled"
+    persona_name: Optional[str]  # Persona 名称
+    session_id: Optional[str]  # Session ID
+    next_run_time: Optional[datetime]  # 下次执行时间
+    result: Optional[str]  # 上次执行结果
+    error_message: Optional[str]  # 错误信息
 ```
 
 ### 字段状态机

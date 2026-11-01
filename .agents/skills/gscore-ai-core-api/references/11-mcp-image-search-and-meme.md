@@ -10,18 +10,18 @@ MCP (Model Context Protocol) 模块允许通过 MCP 协议集成外部工具服�
 
 ```python
 from gsuid_core.ai_core.mcp import (
-    MCPClient,               # MCP 客户端
-    MCPConfig,               # MCP 配置数据类
-    MCPToolDefinition,       # MCP 工具定义
-    mcp_config_manager,      # 全局配置管理器单例
-    parse_mcp_tool_id,       # 解析 "{mcp_id} - {tool_name}" 格式
-    format_mcp_tool_id,      # 格式化 MCP 工具 ID
+    MCPClient,  # MCP 客户端
+    MCPConfig,  # MCP 配置数据类
+    MCPToolDefinition,  # MCP 工具定义
+    mcp_config_manager,  # 全局配置管理器单例
+    parse_mcp_tool_id,  # 解析 "{mcp_id} - {tool_name}" 格式
+    format_mcp_tool_id,  # 格式化 MCP 工具 ID
     register_all_mcp_tools,  # 注册所有 MCP 工具
     register_single_mcp_server,  # 注册单个 MCP 服务器
-    unregister_mcp_server,   # 注销 MCP 服务器
-    register_mcp_token_verifier,     # MCP Server：Bearer 校验
-    register_mcp_event_enricher,     # MCP Server：Event 会话补全
-    register_mcp_export_filter,      # MCP Server：工具导出过滤
+    unregister_mcp_server,  # 注销 MCP 服务器
+    register_mcp_token_verifier,  # MCP Server：Bearer 校验
+    register_mcp_event_enricher,  # MCP Server：Event 会话补全
+    register_mcp_export_filter,  # MCP Server：工具导出过滤
     unregister_mcp_token_verifier,
     unregister_mcp_event_enricher,
     unregister_mcp_export_filter,
@@ -36,15 +36,15 @@ from gsuid_core.ai_core.mcp.mcp_tools_config import mcp_tools_config
 ```python
 @dataclass
 class MCPConfig:
-    name: str                                    # 服务器名称
-    transport: str = "stdio"                     # stdio / sse / streamable_http
-    command: str                                 # 启动命令（stdio，如 "uvx"）
+    name: str  # 服务器名称
+    transport: str = "stdio"  # stdio / sse / streamable_http
+    command: str  # 启动命令（stdio，如 "uvx"）
     args: list[str] = field(default_factory=list)  # 命令参数
     env: dict[str, str] = field(default_factory=dict)  # 环境变量
-    url: str = ""                                # 远程 URL（sse / streamable_http）
+    url: str = ""  # 远程 URL（sse / streamable_http）
     headers: dict[str, str] = field(default_factory=dict)  # HTTP 请求头
-    enabled: bool = True                         # 是否启用
-    register_as_ai_tools: bool = False           # 是否注册为 AI Tools
+    enabled: bool = True  # 是否启用
+    register_as_ai_tools: bool = False  # 是否注册为 AI Tools
     tools: list[MCPToolDefinition] = field(default_factory=list)  # 工具列表
 ```
 
@@ -95,12 +95,16 @@ config = mcp_config_manager.get_config("minimax")
 
 # 创建配置
 from gsuid_core.ai_core.mcp import MCPConfig
-success, msg = mcp_config_manager.create_config("my_server", MCPConfig(
-    name="MyServer",
-    command="uvx",
-    args=["my-mcp-server"],
-    env={"API_KEY": "xxx"},
-))
+
+success, msg = mcp_config_manager.create_config(
+    "my_server",
+    MCPConfig(
+        name="MyServer",
+        command="uvx",
+        args=["my-mcp-server"],
+        env={"API_KEY": "xxx"},
+    ),
+)
 
 # 列出所有工具
 tools = mcp_config_manager.list_all_tools()

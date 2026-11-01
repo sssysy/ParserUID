@@ -9,8 +9,8 @@
 _TOOL_REGISTRY: Dict[str, Dict[str, ToolBase]] = {
     "self": {
         "send_message_by_ai": ToolBase(...),
-        "add_once_task": ToolBase(...),       # 定时任务"创建"入口，口语化触发
-        "add_interval_task": ToolBase(...),   # 定时任务"创建"入口，口语化触发
+        "add_once_task": ToolBase(...),  # 定时任务"创建"入口，口语化触发
+        "add_interval_task": ToolBase(...),  # 定时任务"创建"入口，口语化触发
     },
     "buildin": {
         "search_cognition": ToolBase(...),
@@ -59,7 +59,7 @@ _TOOL_REGISTRY: Dict[str, Dict[str, ToolBase]] = {
     },
     "my_plugin": {
         "my_custom_tool": ToolBase(...),
-    }
+    },
 }
 ```
 
@@ -126,11 +126,13 @@ async def my_simple_tool(query: str) -> str:
     """简单查询工具"""
     ...
 
+
 # 核心工具（主Agent直接调用，需谨慎）
 @ai_tools(category="common")
 async def my_core_tool(ctx: RunContext[ToolContext], uid: str) -> str:
     """核心工具，主Agent直接调用"""
     ...
+
 
 # 插件专属分类
 @ai_tools(category="genshin")

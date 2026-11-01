@@ -38,7 +38,8 @@ for name, tool_base in all_flat.items():
 @dataclass
 class ToolContext:
     """工具执行上下文"""
-    bot: Optional[Bot] = None   # Bot 实例，用于发送消息
+
+    bot: Optional[Bot] = None  # Bot 实例，用于发送消息
     ev: Optional[Event] = None  # 事件实例，包含用户ID、群组ID等
     extra: Dict[str, Any] = field(default_factory=dict)  # 工具间临时传递状态
 ```
@@ -96,12 +97,12 @@ class ManualKnowledgeBase(TypedDict):
 
 ```python
 class ImageEntity(TypedDict):
-    id: str               # 唯一标识符
-    plugin: str           # 插件名称
-    path: str             # 图片文件路径
-    tags: List[str]       # 描述标签
-    content: str          # 详细描述文本
-    source: str           # "plugin"
+    id: str  # 唯一标识符
+    plugin: str  # 插件名称
+    path: str  # 图片文件路径
+    tags: List[str]  # 描述标签
+    content: str  # 详细描述文本
+    source: str  # "plugin"
     _hash: Optional[str]  # 内容哈希
 ```
 
@@ -109,20 +110,23 @@ class ImageEntity(TypedDict):
 
 ```python
 class ToolBase:
-    name: str                    # 工具名
-    description: str             # 工具描述
-    plugin: str                  # 所属插件（"core" 或插件名）
-    tool: Tool[ToolContext]       # PydanticAI Tool 对象
+    name: str  # 工具名
+    description: str  # 工具描述
+    plugin: str  # 所属插件（"core" 或插件名）
+    tool: Tool[ToolContext]  # PydanticAI Tool 对象
 ```
 
 ## 10.9 `CheckFunc` 类型
 
 ```python
 # 支持同步和异步
-CheckFunc = Callable[..., Union[
-    Tuple[bool, str],
-    Awaitable[Tuple[bool, str]],
-]]
+CheckFunc = Callable[
+    ...,
+    Union[
+        Tuple[bool, str],
+        Awaitable[Tuple[bool, str]],
+    ],
+]
 
 # 返回值: (True, "") 校验通过；(False, "原因") 校验失败并反馈给 AI
 ```

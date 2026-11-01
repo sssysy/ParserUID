@@ -93,14 +93,15 @@ ignore_dep = {"python", "fastapi", "pydantic", "gsuid-core", "toml", "packaging"
 
 ```python
 def cached_import(self, module_name, filepath, _type):
-    if module_name in _module_cache: return _module_cache[module_name]
+    if module_name in _module_cache:
+        return _module_cache[module_name]
     spec = importlib.util.spec_from_file_location(module_name, filepath)
     module = importlib.module_from_spec(spec)
-    sys.modules[module_name] = module      # 先放入 sys.modules（处理循环导入）
+    sys.modules[module_name] = module  # 先放入 sys.modules（处理循环导入）
     try:
-        spec.loader.exec_module(module)    # 执行模块 → 触发 @sv.on_command 等装饰器
+        spec.loader.exec_module(module)  # 执行模块 → 触发 @sv.on_command 等装饰器
     except Exception:
-        del sys.modules[module_name]       # 失败清理 dirty module
+        del sys.modules[module_name]  # 失败清理 dirty module
         raise
     _module_cache[module_name] = module
 ```
@@ -124,11 +125,18 @@ GsCore 有**三层配置**，物理上分开存储：
 
 ```python
 CONFIG_DEFAULT = {
-    "HOST": "localhost", "PORT": "8765", "ENABLE_HTTP": False,
-    "WS_TOKEN": "", "TRUSTED_IPS": ["localhost", "::1", "127.0.0.1"],
-    "masters": [], "superusers": [], "REGISTER_CODE": _generate_register_code(),
-    "misfire_grace_time": 90, "log": {...},
-    "enable_empty_start": True, "command_start": [],
+    "HOST": "localhost",
+    "PORT": "8765",
+    "ENABLE_HTTP": False,
+    "WS_TOKEN": "",
+    "TRUSTED_IPS": ["localhost", "::1", "127.0.0.1"],
+    "masters": [],
+    "superusers": [],
+    "REGISTER_CODE": _generate_register_code(),
+    "misfire_grace_time": 90,
+    "log": {...},
+    "enable_empty_start": True,
+    "command_start": [],
     "sv": {},
 }
 ```
@@ -147,10 +155,11 @@ CONFIG_DEFAULT = {
 class PluginConfigStore:
     def __init__(self):
         self._migrate_from_config()  # 启动时把旧 config.json["plugins"] 拆成独立 JSON 并移除该 key
-        self._load_all()             # 加载 data/plugins_configs/*.json 到内存缓存
-    def get_all(self) -> Dict[str, dict]: ...   # 与旧 config_plugins 兼容
-    def save(self, plugin_name): ...            # 持久化单个插件配置
-    def save_all(self): ...                      # 持久化所有
+        self._load_all()  # 加载 data/plugins_configs/*.json 到内存缓存
+
+    def get_all(self) -> Dict[str, dict]: ...  # 与旧 config_plugins 兼容
+    def save(self, plugin_name): ...  # 持久化单个插件配置
+    def save_all(self): ...  # 持久化所有
 ```
 
 迁移时会先备份 `config.json → data/config_backup.json`（若不存在）再拆分。
@@ -175,8 +184,8 @@ class SV:
 ```python
 def set_config(self, key, value):
     if key in self.config_list:
-        self.config[key].data = value   # 1. 改内存
-        self.write_config()             # 2. 立即落盘 json.dump
+        self.config[key].data = value  # 1. 改内存
+        self.write_config()  # 2. 立即落盘 json.dump
         return True
     return False
 ```

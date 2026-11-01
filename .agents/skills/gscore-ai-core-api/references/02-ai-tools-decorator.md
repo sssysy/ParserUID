@@ -6,6 +6,7 @@
 @overload
 def ai_tools(func: F, /) -> F: ...
 
+
 @overload
 def ai_tools(
     func: None = None,
@@ -104,13 +105,15 @@ from pydantic_ai import RunContext
 from gsuid_core.ai_core.models import ToolContext
 from gsuid_core.ai_core.register import ai_tools
 
+
 # 模式一：RunContext（推荐）
 @ai_tools(category="default")
 async def my_tool_v1(ctx: RunContext[ToolContext], query: str) -> str:
     """工具描述，AI 会看到这段文档"""
-    bot = ctx.deps.bot   # Bot 对象
-    ev = ctx.deps.ev     # Event 对象
+    bot = ctx.deps.bot  # Bot 对象
+    ev = ctx.deps.ev  # Event 对象
     return f"查询结果: {query}"
+
 
 # 模式二：ToolContext
 @ai_tools(category="default")
@@ -118,11 +121,13 @@ async def my_tool_v2(ctx: ToolContext, query: str) -> str:
     """工具描述"""
     return f"查询结果: {query}"
 
+
 # 模式三：无上下文
 @ai_tools(category="default")
 async def my_tool_v3(query: str) -> str:
     """工具描述"""
     return f"查询结果: {query}"
+
 
 # 模式四：自动注入 Bot/Event（不暴露给 LLM）
 @ai_tools(category="default")
@@ -142,6 +147,7 @@ async def my_tool(query: str) -> str:
     """工具描述"""
     return query
 
+
 # 方式二：带参数装饰
 @ai_tools(category="common", check_func=my_check_func)
 async def my_tool(ctx: RunContext[ToolContext], query: str) -> str:
@@ -157,11 +163,13 @@ async def my_tool(ctx: RunContext[ToolContext], query: str) -> str:
 from gsuid_core.models import Event
 from gsuid_core.bot import Bot
 
+
 # 同步 check_func
 def check_admin(ev: Event) -> tuple[bool, str]:
     if ev.user_id in ADMIN_LIST:
         return True, ""
     return False, "⚠️ 权限不足：仅管理员可用"
+
 
 # 异步 check_func
 async def check_level(bot: Bot, ev: Event) -> tuple[bool, str]:
@@ -169,6 +177,7 @@ async def check_level(bot: Bot, ev: Event) -> tuple[bool, str]:
     if level >= 10:
         return True, ""
     return False, f"⚠️ 等级不足：需要10级，当前{level}级"
+
 
 # 使用 check_func
 @ai_tools(check_func=check_admin)

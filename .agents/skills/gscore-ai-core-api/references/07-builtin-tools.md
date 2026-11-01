@@ -761,23 +761,25 @@ FINANCE_PROMPT = """你是一个严谨的「量化操盘代理」。你没有任
 
 
 def register_finance_agent() -> None:
-    register_agent_node(AgentNode(
-        node_id="finance_agent",
-        display_name="操盘助手",
-        when_to_use="需要查行情、做仓位决策、每日复盘的金融任务",
-        prompt=FINANCE_PROMPT,
-        match_keywords=["炒股", "操盘", "股票", "金融", "行情", "选股"],
-        tool_packs=[TASK_BASICS_PACK],
-        tool_names=[
-            "send_stock_info",
-            "send_my_stock",
-            "send_my_stock_img",
-            "send_stock_PB_info",
-            "search_stock",
-            "get_vix_index",
-            "send_cloudmap_img",
-        ],
-    ))
+    register_agent_node(
+        AgentNode(
+            node_id="finance_agent",
+            display_name="操盘助手",
+            when_to_use="需要查行情、做仓位决策、每日复盘的金融任务",
+            prompt=FINANCE_PROMPT,
+            match_keywords=["炒股", "操盘", "股票", "金融", "行情", "选股"],
+            tool_packs=[TASK_BASICS_PACK],
+            tool_names=[
+                "send_stock_info",
+                "send_my_stock",
+                "send_my_stock_img",
+                "send_stock_PB_info",
+                "search_stock",
+                "get_vix_index",
+                "send_cloudmap_img",
+            ],
+        )
+    )
 
 
 register_finance_agent()
@@ -917,7 +919,7 @@ await add_self_note(
 会产生消费 / 敏感副作用的插件工具，**声明一个参数即接入强制审批**：
 
 ```python
-@ai_tools(category="common", approval="user")   # 或 approval="master"
+@ai_tools(category="common", approval="user")  # 或 approval="master"
 async def generate_video(ctx: RunContext[ToolContext], prompt: str) -> str:
     """按提示词生成视频（消耗积分，需用户授权）"""
     ...

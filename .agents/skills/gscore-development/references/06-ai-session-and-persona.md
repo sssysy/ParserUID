@@ -65,7 +65,8 @@ async def get_ai_session(event: Event) -> GsCoreAIAgent:
 
 ```python
 class AISessionRegistry:
-    _ai_sessions: Dict[str, Any]   # session_id -> GsCoreAIAgent
+    _ai_sessions: Dict[str, Any]  # session_id -> GsCoreAIAgent
+
     def get_ai_session(self, session_id): ...
     def set_ai_session(self, session_id, session): ...
 ```

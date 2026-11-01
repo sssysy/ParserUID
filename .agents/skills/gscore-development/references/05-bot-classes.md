@@ -24,12 +24,12 @@ _Bot (底层连接实现)  ──包装──►  Bot (高层业务包装器)  �
 ```python
 class _Bot:
     def __init__(self, _id: str, ws: Optional[WebSocket] = None):
-        self.bot_id = _id          # = WS_BOT_ID（WS 连接 ID，不是平台 ID！）
-        self.bot = ws              # WebSocket 连接（HTTP 模式为 None）
-        self.queue = asyncio.queues.PriorityQueue()    # 任务队列
-        self.sem = asyncio.Semaphore(10)               # 任务并发控制
-        self._send_queue = asyncio.queues.Queue()      # 独立发送队列
-        self._send_task = None                          # 发送 worker 任务
+        self.bot_id = _id  # = WS_BOT_ID（WS 连接 ID，不是平台 ID！）
+        self.bot = ws  # WebSocket 连接（HTTP 模式为 None）
+        self.queue = asyncio.queues.PriorityQueue()  # 任务队列
+        self.sem = asyncio.Semaphore(10)  # 任务并发控制
+        self._send_queue = asyncio.queues.Queue()  # 独立发送队列
+        self._send_task = None  # 发送 worker 任务
 ```
 
 | 关键方法 | 说明 |
@@ -63,12 +63,13 @@ async def target_send(self, ...):
 
 ```python
 class Bot:
-    instances: Dict[str, "Bot"] = {}           # 单轮交互实例
-    mutiply_instances: Dict[str, "Bot"] = {}   # 多轮交互实例
+    instances: Dict[str, "Bot"] = {}  # 单轮交互实例
+    mutiply_instances: Dict[str, "Bot"] = {}  # 多轮交互实例
     mutiply_map: Dict[str, str] = {}
+
     def __init__(self, bot: _Bot, ev: Event):
-        self.bot = bot                # 底层 _Bot
-        self.ev = ev                  # 当前事件
+        self.bot = bot  # 底层 _Bot
+        self.ev = ev  # 当前事件
         self.bot_id = ev.bot_id
         self.bot_self_id = ev.bot_self_id
 ```
@@ -105,8 +106,8 @@ class MockBot:
 
 ```python
 class GsServer:
-    active_ws: Dict[str, WebSocket]   # WebSocket 连接
-    active_bot: Dict[str, _Bot]       # _Bot 实例（断开后保留 5 分钟以便重连复用）
+    active_ws: Dict[str, WebSocket]  # WebSocket 连接
+    active_bot: Dict[str, _Bot]  # _Bot 实例（断开后保留 5 分钟以便重连复用）
 ```
 
 - **首次连接**：`_Bot(bot_id, websocket)` + `start_send_worker()`。
@@ -133,7 +134,7 @@ Event.WS_BOT_ID  = WS 连接 ID（= _Bot.bot_id）—— gss.active_bot 的 key
 
 ```python
 async def _get_bot_for_session(self, event: Event) -> Optional["_Bot"]:
-    if event.WS_BOT_ID and event.WS_BOT_ID in gss.active_bot:   # 1. WS_BOT_ID 直查
+    if event.WS_BOT_ID and event.WS_BOT_ID in gss.active_bot:  # 1. WS_BOT_ID 直查
         return gss.active_bot[event.WS_BOT_ID]
     # 2. 遍历历史 metadata 找 bot_id 兜底
     # 3. 返回任意可用 _Bot 兜底

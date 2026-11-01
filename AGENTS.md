@@ -128,8 +128,7 @@ Plugins(
 
 ```python
 @sv.on_message(block=False)
-async def on_parser_message(bot: Bot, ev: Event) -> None:
-    ...
+async def on_parser_message(bot: Bot, ev: Event) -> None: ...
 ```
 
 入口要求：

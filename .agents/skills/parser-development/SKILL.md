@@ -107,8 +107,7 @@ sv = SV("示例平台解析器命令", pm=0, area="ALL")
 
 
 @sv.on_fullmatch("example_login", block=True)
-async def login(bot: Bot, ev: Event) -> None:
-    ...
+async def login(bot: Bot, ev: Event) -> None: ...
 ```
 
 - `__init__.py` 是解析器包入口，注册中心只导入该文件；命令与 `PARSER`

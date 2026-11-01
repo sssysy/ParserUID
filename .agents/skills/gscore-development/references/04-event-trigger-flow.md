@@ -92,7 +92,7 @@ for sv in SL.lst:
 
 ```python
 if "提及应答" in ai_mode:
-    should_respond = event.is_tome          # @机器人
+    should_respond = event.is_tome  # @机器人
     if not should_respond and keywords:
         msg_text = getattr(event, "raw_text", "") or ""
         should_respond = any(kw in msg_text for kw in keywords)

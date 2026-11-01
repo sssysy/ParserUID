@@ -61,9 +61,13 @@ RF-Mem 双过程检索 + 生命周期 + 多模态摄入。
 ```python
 @dataclass
 class ObservationRecord:
-    raw_content: str; speaker_id: str; group_id: str; scope_key: str
-    timestamp: datetime; message_type: str   # group_msg / private_msg
-    value_tier: str                           # C1：HIGH / LOW
+    raw_content: str
+    speaker_id: str
+    group_id: str
+    scope_key: str
+    timestamp: datetime
+    message_type: str  # group_msg / private_msg
+    value_tier: str  # C1：HIGH / LOW
 ```
 
 **C1 摄入质量门控**（`_gate()`，100% 纯规则零 LLM）：① 过滤噪声；② 打 `value_tier`。
@@ -172,8 +176,12 @@ Flush：`create_episode()` → `_llm_extract()` → `extract_and_upsert_entities
 ```python
 @dataclass
 class MemoryContext:
-    episodes: list[dict]; entities: list[dict]; edges: list[dict]; retrieval_meta: dict
-    def to_prompt_text(self, max_chars=3000) -> str: ...   # 【已知事实】+【历史对话片段】
+    episodes: list[dict]
+    entities: list[dict]
+    edges: list[dict]
+    retrieval_meta: dict
+
+    def to_prompt_text(self, max_chars=3000) -> str: ...  # 【已知事实】+【历史对话片段】
 ```
 
 ## 9.6 分层语义图（`memory/ingestion/hiergraph.py`）

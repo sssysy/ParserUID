@@ -24,6 +24,7 @@ from gsuid_core.models import Event
 
 sv = SV("股票插件")
 
+
 @sv.on_command(
     "个股",
     to_ai="""
@@ -51,6 +52,7 @@ async def send_stock_img(bot: Bot, ev: Event):
 
 ```python
 from gsuid_core.ai_core.trigger_bridge import ai_return
+
 
 @sv.on_command("个股", to_ai="查询股票走势...")
 async def send_stock_img(bot: Bot, ev: Event):

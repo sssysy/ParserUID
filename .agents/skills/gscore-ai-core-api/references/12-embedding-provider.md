@@ -15,19 +15,24 @@ from gsuid_core.ai_core.rag.embedding_registry import (
     register_embedding_provider,
 )
 
+
 def _factory() -> EmbeddingProvider:
-    from .provider import MyProvider   # ← 重依赖在这里才被 import（AI 后台初始化线程）
+    from .provider import MyProvider  # ← 重依赖在这里才被 import（AI 后台初始化线程）
+
     return MyProvider.from_config()
 
-register_embedding_provider(EmbeddingProviderEntry(
-    name="my_provider",                  # 配置项 embedding_provider 的取值
-    factory=_factory,                    # 懒构造工厂
-    kind="local",                        # local: RAG 同步小批量 / remote: 大批量
-    display_name="My Provider",          # 网页控制台展示名
-    check_config=None,                   # 可选：AI 向导状态检查钩子
-    config_source=None,                  # 可选：插件 StringConfig，供 summary API 返回
-    plugin="MyPluginName",               # 来源插件名（报错归因）
-))
+
+register_embedding_provider(
+    EmbeddingProviderEntry(
+        name="my_provider",  # 配置项 embedding_provider 的取值
+        factory=_factory,  # 懒构造工厂
+        kind="local",  # local: RAG 同步小批量 / remote: 大批量
+        display_name="My Provider",  # 网页控制台展示名
+        check_config=None,  # 可选：AI 向导状态检查钩子
+        config_source=None,  # 可选：插件 StringConfig，供 summary API 返回
+        plugin="MyPluginName",  # 来源插件名（报错归因）
+    )
+)
 ```
 
 ## 12.2 `EmbeddingProviderEntry` 字段说明
@@ -51,10 +56,12 @@ register_embedding_provider(EmbeddingProviderEntry(
 # plugins/MyPlugin/MyPlugin/provider.py
 from gsuid_core.ai_core.rag.embedding import EmbeddingProvider
 
+
 class MyProvider(EmbeddingProvider):
     def __init__(self, model_name: str, device: str = "cpu"):
         # 重依赖在 import 期就一次性加载（factory 内部 import 后）
         from sentence_transformers import SentenceTransformer
+
         self._model = SentenceTransformer(model_name, device=device)
 
     @property
@@ -80,11 +87,13 @@ class MyProvider(EmbeddingProvider):
 
 ```python
 # ❌ 错误：插件 __init__.py 顶层 import 重依赖
-from sentence_transformers import SentenceTransformer   # 启动拖慢数秒！
+from sentence_transformers import SentenceTransformer  # 启动拖慢数秒！
+
 
 # ✅ 正确：工厂内部 import
 def _factory() -> EmbeddingProvider:
-    from sentence_transformers import SentenceTransformer   # AI 后台线程才执行
+    from sentence_transformers import SentenceTransformer  # AI 后台线程才执行
+
     return MyProvider(...)
 ```
 
@@ -139,6 +148,7 @@ plugins/STEmbedding/
 ```python
 # 在 AI 后台线程中查看当前已注册的 Provider
 from gsuid_core.ai_core.rag.embedding_registry import list_embedding_providers
+
 print(list_embedding_providers())  # → [EmbeddingProviderEntry(name='my_provider', ...), ...]
 ```
 

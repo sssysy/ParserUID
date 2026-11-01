@@ -105,6 +105,7 @@ history 红线，以及在固定锚点 `fire_hooks`。记忆、关系温度、�
 ```python
 from gsuid_core.ai_core.hooks import AgentHookPoint, AgentHookContext, on_agent_hook
 
+
 @on_agent_hook(AgentHookPoint.AFTER_CONTEXT, priority=420)
 async def inject_watchlist(ctx: AgentHookContext) -> None:
     if ctx.ev is not None and ctx.group_id:
@@ -124,6 +125,7 @@ async def inject_watchlist(ctx: AgentHookContext) -> None:
 from gsuid_core.ai_core.kits import AgentKit, register_agent_kit
 from gsuid_core.ai_core.hooks import AgentHookPoint, AgentHookContext, on_agent_hook
 
+
 class Mem0Kit(AgentKit):
     def register(self) -> None:
         on_agent_hook(AgentHookPoint.ON_INBOUND, priority=420, kit_id=self.kit_id)(self.observe)
@@ -138,9 +140,9 @@ class Mem0Kit(AgentKit):
         if text:
             ctx.set_context_block("memory", text)
 
+
 KIT = register_agent_kit(
-    Mem0Kit(kit_id="mymem.mem0", slot="memory", display_name="Mem0 记忆",
-            owns_tools=("my_mem_search",))
+    Mem0Kit(kit_id="mymem.mem0", slot="memory", display_name="Mem0 记忆", owns_tools=("my_mem_search",))
 )
 ```
 

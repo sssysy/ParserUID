@@ -18,7 +18,8 @@ heartbeat/
 
 ```python
 class HeartbeatInspector:
-    _scheduled_jobs: dict[str, str]   # persona_name -> job_id
+    _scheduled_jobs: dict[str, str]  # persona_name -> job_id
+
     def start_for_persona(self, persona_name) -> bool: ...
     def stop_for_persona(self, persona_name) -> bool: ...
     def start_all(self) -> bool: ...
@@ -50,8 +51,8 @@ class HeartbeatInspector:
 ```
 
 ```python
-MAX_CONCURRENT_LLM_CALLS = 5    # 信号量
-INACTIVE_THRESHOLD_HOURS = 1    # 冷场阈值
+MAX_CONCURRENT_LLM_CALLS = 5  # 信号量
+INACTIVE_THRESHOLD_HOURS = 1  # 冷场阈值
 ```
 
 > **主人识别（巡检也会称呼「主人」）**：巡检的 system_prompt 是**裸人格**
@@ -103,9 +104,9 @@ scheduled_task/
 ### 安全限制（防滥用，强制）
 
 ```python
-MAX_PENDING_TASKS_PER_USER = 20   # 单用户最多 20 个待执行
-MAX_EXECUTION_LIMIT = 10          # 循环任务最多 10 次（即便用户要"无限循环"也强制 10）
-MIN_INTERVAL_SECONDS = 300        # 循环最小间隔 5 分钟
+MAX_PENDING_TASKS_PER_USER = 20  # 单用户最多 20 个待执行
+MAX_EXECUTION_LIMIT = 10  # 循环任务最多 10 次（即便用户要"无限循环"也强制 10）
+MIN_INTERVAL_SECONDS = 300  # 循环最小间隔 5 分钟
 ```
 
 ### 执行器与重启恢复

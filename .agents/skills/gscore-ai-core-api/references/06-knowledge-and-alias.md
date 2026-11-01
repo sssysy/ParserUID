@@ -36,11 +36,12 @@ def ai_entity(entity: Union[KnowledgePoint, KnowledgeBase]) -> None
 from gsuid_core.ai_core.register import ai_entity
 from gsuid_core.ai_core.models import KnowledgePoint
 
-ai_entity(KnowledgePoint(
-    id="genshin_character_shogun",
-    plugin="GenshinUID",
-    title="雷电将军 - 角色介绍",
-    content="""
+ai_entity(
+    KnowledgePoint(
+        id="genshin_character_shogun",
+        plugin="GenshinUID",
+        title="雷电将军 - 角色介绍",
+        content="""
 # 雷电将军
 
 ## 基本信息
@@ -59,9 +60,10 @@ ai_entity(KnowledgePoint(
 ## 适用阵容
 雷电将军在超导、感电等队伍中效果优异。
 """,
-    tags=["原神", "雷电将军", "雷神", "角色", "长枪", "雷元素"],
-    entity="雷电将军",
-))
+        tags=["原神", "雷电将军", "雷神", "角色", "长枪", "雷元素"],
+        entity="雷电将军",
+    )
+)
 ```
 
 **注意**：
@@ -94,14 +96,16 @@ def add_manual_knowledge(entity: ManualKnowledgeBase) -> bool
 **示例**：
 
 ```python
-success = add_manual_knowledge(ManualKnowledgeBase(
-    id="faq_bind_account",
-    plugin="custom",
-    title="如何绑定账号",
-    content="Q: 如何绑定游戏账号？\nA: 发送 '绑定 你的UID' 即可完成绑定。",
-    tags=["FAQ", "绑定", "账号"],
-    source="manual",
-))
+success = add_manual_knowledge(
+    ManualKnowledgeBase(
+        id="faq_bind_account",
+        plugin="custom",
+        title="如何绑定账号",
+        content="Q: 如何绑定游戏账号？\nA: 发送 '绑定 你的UID' 即可完成绑定。",
+        tags=["FAQ", "绑定", "账号"],
+        source="manual",
+    )
+)
 ```
 
 ## 6.3 手动知识管理 API
@@ -230,15 +234,17 @@ def ai_image(entity: ImageEntity) -> None
 from gsuid_core.ai_core.register import ai_image
 from gsuid_core.ai_core.models import ImageEntity
 
-ai_image(ImageEntity(
-    id="genshin_hutao_illustration",
-    plugin="GenshinUID",
-    path="./resources/characters/hutao.png",
-    tags=["胡桃", "原神", "角色立绘", "火元素"],
-    content="胡桃角色立绘图片，往生堂第七十七代堂主，性格活泼爱捉弄人。",
-    source="plugin",
-    _hash="",
-))
+ai_image(
+    ImageEntity(
+        id="genshin_hutao_illustration",
+        plugin="GenshinUID",
+        path="./resources/characters/hutao.png",
+        tags=["胡桃", "原神", "角色立绘", "火元素"],
+        content="胡桃角色立绘图片，往生堂第七十七代堂主，性格活泼爱捉弄人。",
+        source="plugin",
+        _hash="",
+    )
+)
 ```
 
 ### 图片检索使用
@@ -247,6 +253,7 @@ ai_image(ImageEntity(
 
 ```python
 from gsuid_core.ai_core.rag import search_and_load_image
+
 
 # 在插件命令处理中使用
 async def show_character_image(bot, ev):

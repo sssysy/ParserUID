@@ -48,6 +48,7 @@ translator = create_agent(
     system_prompt="你是一个翻译助手，只负责将中文翻译成英文，不做任何解释。",
 )
 
+
 # 在异步函数中使用
 async def translate(text: str) -> str:
     result = await translator.run(user_message=text)

@@ -137,8 +137,12 @@ worker 子进程，脚本在那些 worker 里跑，不在 Core 的 Python 解释
 ```python
 def get_main_agent_tools() -> ToolList:
     """通道核 MAIN_AGENT_CORE_TOOLS（群/私同一份）。"""
-async def search_tools(query, limit=4, category="all", non_category="", rerank=True, exclude_names=None) -> ToolList: ...
-def get_all_tools() -> Dict[str, ToolBase]: ...          # 平铺所有工具
+
+
+async def search_tools(
+    query, limit=4, category="all", non_category="", rerank=True, exclude_names=None
+) -> ToolList: ...
+def get_all_tools() -> Dict[str, ToolBase]: ...  # 平铺所有工具
 def get_registered_tools() -> Dict[str, Dict[str, ToolBase]]: ...  # 按分类
 ```
 

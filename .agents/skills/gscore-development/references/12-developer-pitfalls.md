@@ -766,7 +766,7 @@ option）下排 **#1**；英文模型的相似度全挤在 0.058 的窄带里，
 `handler.py` / `handle_ai.py` 的 **4 个**调用点都写着：
 
 ```python
-group_id=str(event.group_id or event.user_id)   # ← 私聊时 group_id 变成 user_id
+group_id = str(event.group_id or event.user_id)  # ← 私聊时 group_id 变成 user_id
 ```
 
 而 `observer.py` 按 `ScopeType.GROUP if group_id else ScopeType.USER_GLOBAL` 定 scope，

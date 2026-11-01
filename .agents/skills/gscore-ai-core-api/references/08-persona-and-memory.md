@@ -29,14 +29,14 @@ from gsuid_core.ai_core.persona import (
 
 ```python
 class Persona(TypedDict):
-    id: str              # 唯一标识
-    name: str            # 角色名称
-    description: str     # 角色描述
-    image_path: str      # 立绘图片路径
-    avatar_path: str     # 头像图片路径
-    audio_path: str      # 音频文件路径
-    config_path: str     # 配置文件路径
-    introduction: str    # 角色介绍（长文本）
+    id: str  # 唯一标识
+    name: str  # 角色名称
+    description: str  # 角色描述
+    image_path: str  # 立绘图片路径
+    avatar_path: str  # 头像图片路径
+    audio_path: str  # 音频文件路径
+    config_path: str  # 配置文件路径
+    introduction: str  # 角色介绍（长文本）
 ```
 
 ### 8.1.3 构建 Persona 提示词
@@ -46,10 +46,10 @@ from gsuid_core.ai_core.persona import build_persona_prompt
 
 # 构建完整的 persona 提示词（真实签名，2026-07-12 起）
 prompt = await build_persona_prompt(
-    "my_persona",                    # char_name：角色名
-    mood_key=None,                   # 角色心情键名（主链路不传，在 user 侧注入）
-    group_description=None,          # 群聊简介与画像（可选）
-    extra_stable_context=None,       # 慢变稳定前缀（self_model 自述 + 群画像）
+    "my_persona",  # char_name：角色名
+    mood_key=None,  # 角色心情键名（主链路不传，在 user 侧注入）
+    group_description=None,  # 群聊简介与画像（可选）
+    extra_stable_context=None,  # 慢变稳定前缀（self_model 自述 + 群画像）
 )
 ```
 
@@ -129,10 +129,10 @@ memory_text = mem_ctx.to_prompt_text(max_chars=2000)
 from gsuid_core.ai_core.memory import memory_config
 
 # 记忆系统配置
-memory_config.enable_retrieval    # 是否启用检索
-memory_config.enable_system2      # 是否启用 System-2 检索
+memory_config.enable_retrieval  # 是否启用检索
+memory_config.enable_system2  # 是否启用 System-2 检索
 memory_config.enable_user_global_memory  # 是否启用用户全局记忆
-memory_config.retrieval_top_k     # 检索返回数量
+memory_config.retrieval_top_k  # 检索返回数量
 ```
 
 ### 8.2.4 消息观察
@@ -141,12 +141,7 @@ memory_config.retrieval_top_k     # 检索返回数量
 from gsuid_core.ai_core.memory import observe, ObservationRecord
 
 # 观察消息并记录到记忆
-observe(
-    group_id="群组ID",
-    user_id="用户ID",
-    content="用户说想养一只猫",
-    message_type="text"
-)
+observe(group_id="群组ID", user_id="用户ID", content="用户说想养一只猫", message_type="text")
 
 # 获取观察队列
 queue = get_observation_queue()
