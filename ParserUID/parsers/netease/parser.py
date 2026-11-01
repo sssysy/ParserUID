@@ -24,21 +24,22 @@ MEDIA_HEADERS = {
     "User-Agent": "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)",
 }
 
+SONG_PATTERN = (
+    r"https?://(?:[a-zA-Z0-9_-]+\.)?music\.163\.com/"
+    r"(?:#/)?(?:m/)?(?:#/)?song(?:/(?P<path_id>\d+)|/?\?[^\s]*\bid=(?P<query_id>\d+))"
+)
+
 
 class NeteaseParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name="netease", display_name="网易云音乐")
 
     @handle("163cn.tv", r"https?://[^\s]*163cn\.tv/[A-Za-z0-9]+")
+    @handle("163.lu", r"https?://[^\s]*163\.lu/[A-Za-z0-9]+")
     async def _parse_short_link(self, searched: re.Match[str]) -> Sequence[ContentItem]:
         return await self.parse_with_redirect(searched.group(0), headers=MEDIA_HEADERS)
 
-    @handle(
-        "music.163.com",
-        r"https?://music\.163\.com/(?:"
-        r"song/(?P<path_id>\d+)"
-        r"|(?:#/)?song\?[^\s]*\bid=(?P<query_id>\d+)"
-        r")",
-    )
+    @handle("y.music.163.com", SONG_PATTERN)
+    @handle("music.163.com", SONG_PATTERN)
     async def _parse_song(self, searched: re.Match[str]) -> Sequence[ContentItem]:
         groups = searched.groupdict()
         song_id = groups["path_id"] or groups["query_id"]

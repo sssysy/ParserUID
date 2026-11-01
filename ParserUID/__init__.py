@@ -7,6 +7,7 @@ Plugins(
 )
 
 from . import (  # noqa: E402
+    help as help,
     cache as cache,
     parser as parser,
     webconsole as webconsole,

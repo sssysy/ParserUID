@@ -1,0 +1,25 @@
+{
+  "插件命令": {
+    "desc": "插件提供的命令列表",
+    "data": [
+      {
+        "name": "添加解析白名单",
+        "desc": "添加解析白名单",
+        "eg": "添加解析白名单",
+        "highlight": 6,
+        "need_ck": false,
+        "need_sk": false,
+        "need_admin": false
+      },
+      {
+        "name": "添加解析黑名单",
+        "desc": "添加解析黑名单",
+        "eg": "添加解析黑名单",
+        "highlight": 6,
+        "need_ck": false,
+        "need_sk": false,
+        "need_admin": false
+      }
+    ]
+  }
+}
