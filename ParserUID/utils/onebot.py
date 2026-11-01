@@ -12,10 +12,6 @@ _ONEBOT_API_MODULES = (
     "plugins.OneBotUID.api",
     "gsuid_core.plugins.OneBotUID.api",
 )
-_ONEBOT_RUNTIME_MODULES = (
-    "plugins.OneBotUID.runtime",
-    "gsuid_core.plugins.OneBotUID.runtime",
-)
 _ONEBOT_EMOJI_ID = "289"
 _ONEBOT_CALL_TIMEOUT = 5.0
 _ONEBOT_SEND_TIMEOUT = 20.0
@@ -43,18 +39,6 @@ class _OneBotApiModule(Protocol):
     call_bot_api: _CallBotApi
 
 
-class _Runner(Protocol):
-    pass
-
-
-class _OneBotRuntime(Protocol):
-    def runner_of(self, route_bot_id: str | None) -> _Runner | None: ...
-
-
-class _OneBotRuntimeModule(Protocol):
-    def current_runtime(self) -> _OneBotRuntime: ...
-
-
 def _load_onebot_api() -> _OneBotApiModule | None:
     for module_name in _ONEBOT_API_MODULES:
         try:
@@ -70,36 +54,13 @@ def _load_onebot_api() -> _OneBotApiModule | None:
     return None
 
 
-def _load_onebot_runtime() -> _OneBotRuntimeModule | None:
-    for module_name in _ONEBOT_RUNTIME_MODULES:
-        try:
-            module = importlib.import_module(module_name)
-        except Exception as exc:
-            logger.debug(
-                f"[Parser·音乐卡片] OneBotUID 运行时导入失败 | module={module_name} | error_type={type(exc).__name__}"
-            )
-            continue
-        if isinstance(module, _OneBotRuntimeModule):
-            return module
-    return None
-
-
-def onebot_connection_available(ev: Event) -> bool:
-    """确认当前事件来自已注册的 OneBotUID 连接。"""
-    if not ev.WS_BOT_ID:
-        return False
-    runtime_module = _load_onebot_runtime()
-    if runtime_module is None:
-        return False
-    return runtime_module.current_runtime().runner_of(ev.WS_BOT_ID) is not None
+def onebot_call_api_available() -> bool:
+    """仅以 OneBotUID 的 call_bot_api 能否导入作为能力判断。"""
+    return _load_onebot_api() is not None
 
 
 async def send_music_card(ev: Event, signed_json: str) -> bool:
     """通过 OneBotUID 发送原始签名 JSON。"""
-    if not onebot_connection_available(ev):
-        logger.debug("[Parser·音乐卡片] 当前事件不是 OneBotUID 连接，回退音频")
-        return False
-
     direct = ev.user_type == "direct"
     target_id = ev.user_id if direct else ev.group_id
     if not target_id:

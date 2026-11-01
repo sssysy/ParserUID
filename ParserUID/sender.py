@@ -24,7 +24,7 @@ from .config import (
     max_video_duration_seconds,
 )
 from .utils.ffmpeg import probe_duration
-from .utils.onebot import send_music_card, onebot_connection_available
+from .utils.onebot import send_music_card, onebot_call_api_available
 from .render.models import PreviewCard
 from .utils.exceptions import ResourceLimitException, sanitize_error_text
 from .utils.music_card import MusicCardInfo, sign_music_card
@@ -166,7 +166,7 @@ async def send_parse_result(
         logger.info("[Parser·发送] 解析结果为空，不发送")
         return False
 
-    if _has_music_card_candidate(contents, bot.ev):
+    if _has_music_card_candidate(contents):
         return await _send_with_music_cards(
             bot,
             contents,
@@ -202,9 +202,8 @@ async def send_parse_result(
 
 def _has_music_card_candidate(
     contents: Sequence[ContentItem],
-    ev: Event,
 ) -> bool:
-    if not qq_music_card_enabled() or not onebot_connection_available(ev):
+    if not qq_music_card_enabled() or not onebot_call_api_available():
         return False
     for item in contents:
         if item.kind() == "audio" and isinstance(item, MusicCardContentProtocol):
