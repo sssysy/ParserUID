@@ -1,0 +1,31 @@
+{
+  "data": [
+    {
+      "name": "QQ音乐登录",
+      "desc": "使用手机 QQ 扫码登录；附加 wx 参数切换微信扫码",
+      "eg": "QQ音乐登录",
+      "highlight": 6,
+      "need_ck": false,
+      "need_sk": false,
+      "need_admin": true
+    },
+    {
+      "name": "QQ音乐状态",
+      "desc": "查看当前 QQ音乐登录账号状态",
+      "eg": "QQ音乐状态",
+      "highlight": 6,
+      "need_ck": false,
+      "need_sk": false,
+      "need_admin": false
+    },
+    {
+      "name": "QQ音乐退出",
+      "desc": "清除本机保存的 QQ音乐扫码凭据",
+      "eg": "QQ音乐退出",
+      "highlight": 6,
+      "need_ck": false,
+      "need_sk": false,
+      "need_admin": true
+    }
+  ]
+}

@@ -1,206 +1,195 @@
-"""QQ音乐链接解析器。"""
+"""QQ音乐原生 CGI 链接解析器。"""
 
 from __future__ import annotations
 
 import re
-import asyncio
 from typing import ClassVar
 from pathlib import Path
 from collections.abc import Sequence
 
-import httpx
-import msgspec
-
 from gsuid_core.logger import logger
 
+from .qmc import QmcError
+from .auth import load_credential, credential_from_config
 from ..base import BaseParser, handle
-from .models import (
-    QualityInfo,
-    QQMusicResponse,
-)
+from .lyric import fetch_lyric
+from .client import WEB_UA, QqMusicClient
+from .models import QqTrack, QqSinger, QqCredential, QqInfoSection, QqSongDetailData
 from .decrypt import decrypt_qqmusic_file
+from .quality import ResolvedAudio, resolve_audio, normalize_quality
 from ...sender import ContentItem
 from ...utils.models import Platform
-from ...utils.downloader import Downloader
+from ...render.models import Metric
 from ...utils.exceptions import ParseException, DownloadException
 
-API_URL = "https://parse-api.sokoko.org/api/qq/song"
-SOURCE_SUFFIXES = frozenset({".mflac", ".mflac0", ".mgg", ".mgg1", ".mmp4", ".flac", ".ogg", ".m4a", ".mp3"})
-AUDIO_SIGNATURES = ((b"fLaC", ".flac"), (b"OggS", ".ogg"), (b"ID3", ".mp3"))
-
-
-class QQMusicDecrypter:
-    """下载 QMC 源文件并在发送阶段按 ekey 解密。"""
-
-    def __init__(
-        self,
-        downloader: Downloader,
-        url: str,
-        mid: str,
-        ekey: str,
-        headers: dict[str, str],
-        proxy: str | None = None,
-    ) -> None:
-        self.downloader = downloader
-        self.url = url
-        self.mid = mid
-        self.ekey = ekey
-        self.headers = headers
-        self.proxy = proxy
-
-    async def __call__(self) -> Path:
-        suffix = _source_suffix(self.url)
-        source = await self.downloader.download_file(
-            self.url,
-            filename=f"qqmusic_{self.mid}{suffix}",
-            headers=self.headers,
-            proxy=self.proxy,
-        )
-        if not self.ekey:
-            return await _ensure_audio_suffix(source)
-        try:
-            decrypted = await decrypt_qqmusic_file(source, self.ekey)
-        except Exception as exc:
-            logger.warning(f"[QQ音乐] QMC 解密失败 | mid={self.mid} | error={exc}")
-            raise DownloadException("QQ音乐音频解密失败") from exc
-        return decrypted
+_MEDIA_HEADERS = {"Referer": "https://y.qq.com/", "User-Agent": WEB_UA}
+_ENCRYPTED_SUFFIXES = frozenset({".mflac", ".mflac0", ".mgg", ".mgg1", ".mmp4"})
 
 
 class QQMusicParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name="qqmusic", display_name="QQ音乐")
 
     @handle(
-        "c6.y.qq.com/base/fcgi-bin/u",
-        r"https?://c6\.y\.qq\.com/base/fcgi-bin/u\?[^\s]*__=[A-Za-z0-9]+",
+        "c6.y.qq.com",
+        r"https?://c6\.y\.qq\.com/base/fcgi-bin/u\?[^\s]*__=[A-Za-z0-9]+",
+    )
+    @handle(
+        "c.y.qq.com",
+        r"https?://c\.y\.qq\.com/base/fcgi-bin/u\?[^\s]*__=[A-Za-z0-9]+",
     )
     async def _parse_short_link(self, searched: re.Match[str]) -> Sequence[ContentItem]:
-        return await self.parse_with_redirect(searched.group(0))
+        return await self.parse_with_redirect(searched.group(0), headers=_MEDIA_HEADERS)
 
     @handle(
         "y.qq.com",
         r"https?://y\.qq\.com/n/(?:ryqq|ryqq_v2|yqq)/song(?:Detail/|/)(?P<song_id>[A-Za-z0-9]+)",
     )
     @handle(
-        "i.y.qq.com/v8/playsong.html",
-        r"https?://i\.y\.qq\.com/v8/playsong\.html\?[^\s]*(?:songmid|songid)=(?P<song_id>[A-Za-z0-9]+)",
+        "i.y.qq.com",
+        r"https?://i\.y\.qq\.com/v8/playsong\.html\?[^\s#]*(?:songmid|songid)=(?P<song_id>[A-Za-z0-9]+)",
     )
     @handle(
-        "i2.y.qq.com/n3/other/pages/playsong",
-        r"https?://i2\.y\.qq\.com/n3/other/pages/playsong/index\.html\?[^\s]*(?:songmid|songid)=(?P<song_id>[A-Za-z0-9]+)",
+        "i2.y.qq.com",
+        r"https?://i2\.y\.qq\.com/n3/other/pages/playsong/index\.html\?[^\s#]*"
+        r"(?:songmid|songid)=(?P<song_id>[A-Za-z0-9]+)",
     )
     async def _parse_song(self, searched: re.Match[str]) -> Sequence[ContentItem]:
-        song_id = searched.group("song_id")
-        return await self._parse_song_id(song_id)
+        return await self._parse_song_id(searched.group("song_id"))
 
     async def _parse_song_id(self, song_id: str) -> Sequence[ContentItem]:
+        credential = await self._credential()
         client = await self.get_client()
-        headers = {"Referer": "https://y.qq.com/"}
-        try:
-            resp = await client.get(
-                API_URL,
-                params={"music_id": song_id, "quality": "high"},
-                headers=headers,
-            )
-            if resp.status_code >= 400:
-                raise ParseException(f"QQ音乐接口状态码 {resp.status_code}")
-            payload = msgspec.json.decode(resp.content, type=QQMusicResponse)
-        except (httpx.HTTPError, msgspec.DecodeError) as exc:
-            raise ParseException(f"QQ音乐接口请求失败：{exc}") from exc
+        qqmusic = QqMusicClient(client)
+        detail = await qqmusic.song_detail(song_id, credential)
+        track = detail.track_info
+        if not track.mid:
+            raise ParseException("QQ音乐未返回歌曲 MID")
 
-        if payload.code != 200:
-            raise ParseException("QQ音乐接口返回错误")
-
-        data = payload.data
-        audio_url = data.download_url
-        if not audio_url.startswith(("http://", "https://")):
-            raise ParseException("QQ音乐接口未返回有效音频地址")
-
-        mid = data.id if data.id else song_id
-        ekey = data.ekey
-        duration = max(0.0, float(data.duration_seconds))
-        title = data.title or "未知歌曲"
-        artist = data.artist or "未知歌手"
-        album = data.album
-        cover_url = data.cover if data.cover else None
-        lyric = data.lyric.strip()
-        quality = data.quality.name if isinstance(data.quality, QualityInfo) else str(data.quality)
-
-        decrypter = QQMusicDecrypter(
-            self.downloader,
-            audio_url,
-            mid,
-            ekey,
-            headers,
-            self.proxy,
-        )
+        preferred = normalize_quality(self.get_config_value("quality", "auto"))
+        audio = await resolve_audio(qqmusic, track, credential, preferred)
+        lyric = await fetch_lyric(qqmusic, track, credential)
+        await self._send_song_card(detail, track, audio)
 
         async def load_audio() -> Path:
-            return await decrypter()
+            return await self._download_audio(track, audio)
 
-        audio = self.create_audio_content(loader=load_audio, duration=duration)
-        author = self.create_author(
-            artist,
-            data.artist_pic if data.artist_pic else None,
-        )
-        info_parts: list[str] = [f"时长: {_format_duration(duration)}"]
+        contents: list[ContentItem] = [
+            self.create_audio_content(loader=load_audio, duration=max(0.0, float(track.interval)))
+        ]
+        if lyric:
+            contents.append(self.create_text_content(lyric))
+        return self.result(contents)
+
+    async def _credential(self) -> QqCredential | None:
+        configured = self.get_config_value("cookie").strip()
+        if configured:
+            credential = credential_from_config(configured)
+            if credential is None:
+                raise ParseException("QQ音乐 Cookie 配置无效")
+            return credential
+        return await load_credential()
+
+    async def _send_song_card(
+        self,
+        detail: QqSongDetailData,
+        track: QqTrack,
+        audio: ResolvedAudio,
+    ) -> None:
+        title = track.title or track.name or "未知歌曲"
+        author_name = " / ".join(singer.name for singer in track.singer if singer.name) or "未知歌手"
+        avatar_url = _singer_avatar(track.singer)
+        cover_url = _album_cover(track)
+        album = track.album.title or track.album.name
+        genre = _section_value(detail.info.genre)
+        language = _section_value(detail.info.lan)
+        company = _section_value(detail.info.company)
+        release_date = _section_value(detail.info.pub_time) or track.time_public
+        intro = _section_value(detail.info.intro) or track.subtitle
+
+        extra_parts = [f"音质: {audio.quality_label}", f"格式: {audio.extension.lstrip('.').upper()}"]
         if album:
-            info_parts.append(f"专辑: {album}")
-        if quality:
-            info_parts.append(quality)
-        extra_info = " | ".join(info_parts)
+            extra_parts.append(f"专辑: {album}")
+        if genre:
+            extra_parts.append(f"流派: {genre}")
+        if language:
+            extra_parts.append(f"语言: {language}")
+        if company:
+            extra_parts.append(f"发行: {company}")
+        metrics = (
+            Metric("音质", audio.quality_label),
+            Metric("时长", _format_duration(track.interval)),
+            Metric("格式", audio.extension.lstrip(".").upper()),
+        )
+        if release_date:
+            metrics = (*metrics, Metric("发行", release_date))
 
         await self.send_info(
             title=title,
             card_type="common",
-            author=author,
-            url=f"https://y.qq.com/n/yqq/song/{mid}",
+            author=self.create_author(author_name, avatar_url),
+            text=_short_text(intro),
+            url=f"https://y.qq.com/n/ryqq/songDetail/{track.mid}",
             cover_url=cover_url,
-            extra_info=extra_info,
+            cover_headers=_MEDIA_HEADERS,
+            metrics=metrics,
+            extra_info=" | ".join(extra_parts),
         )
 
-        items: list[ContentItem] = [audio]
-        if lyric:
-            items.append(self.create_text_content(lyric))
-        return self.result(items)
+    async def _download_audio(self, track: QqTrack, audio: ResolvedAudio) -> Path:
+        source_name = f"qqmusic_{track.mid}_{audio.quality.key}{audio.extension}"
+        source = await self.downloader.download_file(
+            audio.url,
+            filename=source_name,
+            headers=_MEDIA_HEADERS,
+            proxy=self.proxy,
+            fallback_urls=audio.fallback_urls,
+        )
+        if not audio.ekey and audio.extension not in _ENCRYPTED_SUFFIXES:
+            return source
+        if not audio.ekey:
+            raise DownloadException("QQ音乐加密音频缺少解密 ekey")
+        try:
+            return await decrypt_qqmusic_file(source, audio.ekey)
+        except (OSError, ValueError, QmcError, DownloadException) as exc:
+            logger.warning(
+                f"[Parser·QQ音乐] QMC 解密失败 | mid={track.mid} | quality={audio.quality.key} "
+                f"| error_type={type(exc).__name__}"
+            )
+            raise DownloadException("QQ音乐音频解密失败") from exc
 
 
-def _source_suffix(url: str) -> str:
-    path = url.split("?", 1)[0].lower()
-    suffix = Path(path).suffix
-    return suffix if suffix in SOURCE_SUFFIXES else ".mp3"
+def _album_cover(track: QqTrack) -> str | None:
+    mid = track.album.mid or track.album.pmid
+    return _photo_url("T002", mid, 800) if mid else None
 
 
-async def _ensure_audio_suffix(path: Path) -> Path:
-    try:
-        header = await asyncio.to_thread(_read_header, path)
-    except OSError:
-        return path
-    suffix = next(
-        (extension for signature, extension in AUDIO_SIGNATURES if header.startswith(signature)),
-        "",
-    )
-    if not suffix and len(header) >= 8 and header[4:8] == b"ftyp":
-        suffix = ".m4a"
-    if not suffix and len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0:
-        suffix = ".mp3"
-    if not suffix or path.suffix.lower() == suffix:
-        return path
-    target = path.with_suffix(suffix)
-    if target.exists():
-        return target
-    try:
-        await asyncio.to_thread(path.replace, target)
-    except OSError:
-        return path
-    return target
+def _singer_avatar(singers: Sequence[QqSinger]) -> str | None:
+    for singer in singers:
+        mid = singer.mid or singer.pmid
+        if mid:
+            return _photo_url("T001", mid, 300)
+    return None
 
 
-def _read_header(path: Path) -> bytes:
-    with path.open("rb") as file:
-        return file.read(12)
+def _photo_url(kind: str, mid: str, size: int) -> str:
+    return f"https://y.gtimg.cn/music/photo_new/{kind}R{size}x{size}M000{mid}.jpg"
 
 
-def _format_duration(seconds: float) -> str:
+def _section_value(section: QqInfoSection) -> str:
+    for item in section.content:
+        if item.value:
+            return item.value.strip()
+    return ""
+
+
+def _short_text(value: str, limit: int = 600) -> str:
+    text = value.strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}..."
+
+
+def _format_duration(seconds: int | float) -> str:
     total = max(0, int(seconds))
     minutes, second = divmod(total, 60)
     return f"{minutes:02d}:{second:02d}"

@@ -38,7 +38,7 @@
 - [x] 3.05 复制打开抖音，看看【小月峰的作品】# 明日方舟终末地# 明日方舟创作者计划 # 明日... https://v.douyin.com/FwPSa8GWqoI/ :3pm 11/04 K@w.se HVy:/
 
 # 酷狗音乐
-- [ ] 没有测试
+- [x] https://h5.kugou.com/v2/v-5a15aeb1/index.html?u=665446968&h1=192801354466464208479940236503093506276&h2=-&hash=13bb286fa12c994ab80f420d972c486f&album_id=49386328&album_audio_id=341606355&source_id=665446968&us=NjY1NDQ2OTY4&usm=d6d904b8e8d496a90176e353933e7a17&sruserid=665446968&kgsscty1=qq_client
 
 # 酷我音乐
 - [ ] 没有测试
@@ -52,7 +52,7 @@
 - [ ] 没有测试
 
 # 网易云音乐
-- [ ] 没有测试
+- [x] https://music.163.com/#/song?id=1990476
 
 # 微博
 

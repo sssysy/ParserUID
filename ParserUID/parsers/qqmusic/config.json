@@ -8,6 +8,38 @@
       "type": "bool",
       "label": "使用代理",
       "default": false
+    },
+    "cookie": {
+      "type": "text",
+      "label": "手动 Cookie",
+      "hint": "选填；扫码登录会保存到 data/ParserUID/cookies/qqmusic_credential.json",
+      "secret": true,
+      "default": ""
+    },
+    "quality": {
+      "type": "select",
+      "label": "音质偏好",
+      "hint": "auto 自动尝试最高可用音质；其他档位从所选档位向下回退",
+      "options": [
+        "auto",
+        "master",
+        "atmos2",
+        "atmos51",
+        "atmos71",
+        "dolby",
+        "dts",
+        "flac",
+        "ogg640",
+        "ogg320",
+        "mp3_320",
+        "ogg192",
+        "aac192",
+        "mp3_128",
+        "ogg96",
+        "aac96",
+        "aac48"
+      ],
+      "default": "auto"
     }
   }
 }
