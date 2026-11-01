@@ -193,8 +193,10 @@ class NeteaseClient:
                 headers=headers,
             )
             response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ParseException(f"网易云 EAPI 请求失败 HTTP {exc.response.status_code}") from exc
         except httpx.HTTPError as exc:
-            raise ParseException("网易云 EAPI 请求失败") from exc
+            raise ParseException(f"网易云 EAPI 请求失败：{exc}") from exc
         return _json_object(response.content), response
 
     async def weapi_raw(self, uri: str, data: dict[str, object]) -> tuple[dict[str, object], httpx.Response]:
@@ -217,8 +219,10 @@ class NeteaseClient:
                 headers=headers,
             )
             response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ParseException(f"网易云 WEAPI 请求失败 HTTP {exc.response.status_code}") from exc
         except httpx.HTTPError as exc:
-            raise ParseException("网易云 WEAPI 请求失败") from exc
+            raise ParseException(f"网易云 WEAPI 请求失败：{exc}") from exc
         return _json_object(response.content), response
 
     async def weapi(self, uri: str, data: dict[str, object]) -> dict[str, object]:

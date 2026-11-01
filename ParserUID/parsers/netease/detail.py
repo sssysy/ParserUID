@@ -64,7 +64,11 @@ class ParsedSong:
 
 
 async def fetch_song(client: NeteaseClient, song_id: str) -> ParsedSong:
-    raw = await client.weapi("/api/v3/song/detail", {"c": f'[{{"id":{song_id}}}]'})
+    payload = {"c": f'[{{"id":{song_id}}}]'}
+    try:
+        raw, _ = await client.eapi("/api/v3/song/detail", payload)
+    except ParseException:
+        raw = await client.weapi("/api/v3/song/detail", payload)
     try:
         response = msgspec.convert(raw, type=SongDetailResponse)
     except (msgspec.ValidationError, TypeError) as exc:
@@ -84,9 +88,16 @@ async def fetch_artist_avatar(client: NeteaseClient, artist_id: int) -> str | No
         return None
     if artist_id in _artist_avatar_cache:
         return _artist_avatar_cache[artist_id]
+    payload = {"id": artist_id}
+    raw: dict[str, object] | None = None
     try:
-        raw = await client.weapi("/api/artist/head/info/get", {"id": artist_id})
-    except (ParseException, httpx.HTTPError):
+        raw, _ = await client.eapi("/api/artist/head/info/get", payload)
+    except ParseException:
+        try:
+            raw = await client.weapi("/api/artist/head/info/get", payload)
+        except (ParseException, httpx.HTTPError):
+            raw = None
+    if raw is None:
         return None
     data = raw.get("data")
     if not isinstance(data, dict):
@@ -106,9 +117,16 @@ async def fetch_artist_avatar(client: NeteaseClient, artist_id: int) -> str | No
 async def fetch_quality_detail(client: NeteaseClient, song_id: str) -> QualityDetail | None:
     if not client.logged_in:
         return None
+    payload = {"songId": song_id}
+    raw: dict[str, object] | None = None
     try:
-        raw = await client.weapi("/api/song/music/detail/get", {"songId": song_id})
+        raw, _ = await client.eapi("/api/song/music/detail/get", payload)
     except ParseException:
+        try:
+            raw = await client.weapi("/api/song/music/detail/get", payload)
+        except ParseException:
+            raw = None
+    if raw is None:
         return None
     try:
         response = msgspec.convert(raw, type=QualityDetailResponse)

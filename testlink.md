@@ -99,14 +99,14 @@
 ## 回答
 - [x] https://www.zhihu.com/question/2098940094346433079/answer/2099831118455481183
 
-# AcFun | 暂不实现，能解决欢迎pr
+# AcFun | 暂不实现，欢迎pr
 
 ## 视频 | 
 - [ ] https://www.acfun.cn/v/ac48934093
 
 # Instagram
 
-## 图文实况视频 | 图/视频混排会分类到视频中，且解析只能解析出第一个视频
+## 图文实况视频 | 解析只能解析出第一个视频
 - [ ] https://www.instagram.com/p/DfIqU_pE_uh/
 
 ## 视频
@@ -114,11 +114,11 @@
 
 # Iwara
 
-## 视频 | 解析失败
-- [ ] https://www.iwara.tv/video/FlNAI2GXPZFEk6
+## 视频
+- [x] https://www.iwara.tv/video/FlNAI2GXPZFEk6
 
-## 图片 | 解析失败
-- [ ] https://www.iwara.tv/image/TDwWYnluelQvrg
+## 图片
+- [x] https://www.iwara.tv/image/TDwWYnluelQvrg
 
 # jmcomic
 
@@ -155,24 +155,24 @@
 ## 频道视频
 - [x] https://t.me/bakapd/17529
 
-## 频道引用 | 引用消息无预览图，且散乱
-- [ ] https://t.me/bakapd/17530
+## 频道引用
+- [x] https://t.me/bakapd/17530
 
 # TikTok
 
-## 视频 | 视频获取失败跳过
-- [ ] https://www.tiktok.com/@mano.daily/video/7682419561756495117
+## 视频
+- [x] https://www.tiktok.com/@mano.daily/video/7682419561756495117
 
 # Twitter
 
-## 视频 | 解析失败
-- [ ] https://x.com/kohanyan_03/status/2116331118668746801
+## 视频
+- [x] https://x.com/kohanyan_03/status/2116331118668746801
 
-## 图文 | 解析失败
-- [ ] https://x.com/jf646/status/2116439565103948041
+## 图文
+- [x] https://x.com/jf646/status/2116439565103948041
 
-## GIF | 解析失败
-- [ ] https://x.com/Firefly_Klon/status/2116212006730813783
+## GIF
+- [x] https://x.com/Firefly_Klon/status/2116212006730813783
 
-# Youtube | 解析失败
-- [ ] https://www.youtube.com/watch?v=uxLsEqqr8m0
+# Youtube
+- [x] https://www.youtube.com/watch?v=uxLsEqqr8m0

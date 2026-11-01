@@ -4,7 +4,7 @@ description: >
   当用户要求为 ParserUID 新增、重写、审查或调试平台解析器时触发。
   适用于创建解析器包、编写 @handle 链接匹配、实现平台 API 请求、
   构造 Description 与有序媒体结果、调整解析器 config.json、排查注册冲突、
-  在解析器包 __init__.py 中注册命令，以及修改解析器相关测试。
+  在解析器包 __init__.py 中注册命令、编写 help.json 与命令图标，以及修改解析器相关测试。
 ---
 
 # ParserUID 平台解析器开发
@@ -18,6 +18,7 @@ description: >
 |------|------|
 | 新增或重写解析器包、实现 `BaseParser` 与 `@handle` | [references/parser-package.md](references/parser-package.md) |
 | 为解析器包添加 `__init__.py` 命令、登录、刷新或配置操作 | [references/parser-package.md](references/parser-package.md#解析器包内命令__init__py) |
+| 为解析器编写帮助数据（`help.json`）与命令图标（`icon_path/`） | [references/parser-package.md](references/parser-package.md#解析器帮助与命令图标helpjson-与-icon_path) |
 | 修改 `config.json`、用户配置和网页配置页字段 | [references/configuration.md](references/configuration.md) |
 | 提交前检查注册、解析、发送、安全和测试 | [references/checklist.md](references/checklist.md) |
 
@@ -29,10 +30,13 @@ ParserUID 是 GsCore 插件，不直接依赖 AstrBot 运行时。
 
 ```text
 ParserUID/parsers/<name>/
-├── __init__.py       # 导出 PARSER
+├── __init__.py       # 导出 PARSER 与平台专属命令
 ├── config.json       # 默认值和字段定义
 ├── parser.py         # BaseParser 子类与 @handle 入口
 ├── models.py         # 平台专属 msgspec.Struct 数据模型
+├── help.json         # 可选：平台命令帮助数据 {"data": [...]}
+├── icon_path/        # 可选：命令图标目录（禁止提供 通用.png）
+│   └── <命令名>.png
 └── <module>.py       # 平台私有请求与解析逻辑
 ```
 
@@ -44,6 +48,9 @@ data/ParserUID/thirdparty/parsers/<name>/
 ├── config.json
 ├── parser.py
 ├── models.py
+├── help.json
+├── icon_path/
+│   └── <命令名>.png
 └── <module>.py
 ```
 
@@ -125,6 +132,26 @@ async def login(bot: Bot, ev: Event) -> None:
 
 完整规则与示例参见
 [references/parser-package.md](references/parser-package.md#解析器包内命令__init__py)。
+
+## 解析器帮助与命令图标
+
+解析器在实现专属命令后，可在其包目录下通过 `help.json` 与 `icon_path/` 向插件帮助系统注册条目：
+
+- **帮助数据 `help.json`**：
+  - 格式严格固定为 `{"data": [...]}`。
+  - **解析器只负责提供 `data` 列表**，标题和描述由插件统一自动生成：
+    - 分类标题：`f"{manifest.display_name}解析命令"`（例如 `哔哩哔哩解析命令`）
+    - 分类描述：`f"由 {manifest.display_name} 解析器提供的命令"`
+  - 每个命令项包含 `name`、`desc`、`eg`、`highlight`、`need_admin` 等字段。
+  - 管理类命令必须声明 `need_admin: true`，帮助系统对普通用户（`pm > 1`）自动过滤隐藏。
+- **命令图标 `icon_path/`**：
+  - 可在包目录下建立 `icon_path/` 放置与命令同名的 `*.png` 图标。
+  - **严禁提供 `通用.png`**：通用兜底图标严格由插件核心提供，解析器若提供会被忽略并告警。
+  - **冲突后覆盖**：不同解析器存在同名图标时，以后扫描/后加载的覆盖先加载的。
+  - 插件在启动与出图时采用方案 3.1（清空重建）统一将各处图标聚合至 `data/ParserUID/icon_path/` 供框架绘制。
+
+详细契约与示例参见
+[references/parser-package.md](references/parser-package.md#解析器帮助与命令图标helpjson-与-icon_path)。
 
 ## 注册与匹配
 
