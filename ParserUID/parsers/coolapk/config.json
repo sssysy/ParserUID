@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "name": "coolapk",
+  "display_name": "酷安",
+  "default_enabled": false,
+  "fields": {
+    "use_proxy": {
+      "type": "bool",
+      "label": "使用代理",
+      "default": false
+    },
+    "include_comments": {
+      "type": "bool",
+      "label": "卡片显示评论",
+      "hint": "抓取镜像站提供的热门评论及前 3 条一级回复",
+      "default": true
+    },
+    "comment_limit": {
+      "type": "int",
+      "label": "评论数量",
+      "hint": "卡片展示的根评论数量，范围 0-20",
+      "default": 5
+    },
+    "show_body_text": {
+      "type": "bool",
+      "label": "发送正文文字",
+      "hint": "关闭时聊天框只发送图片，正文仍显示在预览卡片中",
+      "default": true
+    }
+  }
+}
