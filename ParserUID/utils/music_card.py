@@ -123,7 +123,7 @@ def _validate_card(card: _SignedCard, info: MusicCardInfo) -> None:
     if not card.config.token:
         raise MusicCardException("QQ 音乐卡片缺少签名")
     music = card.meta.music
-    if music.musicUrl != info.audio_url:
+    if music.musicUrl != info.audio_url and music.musicUrl.replace(" ", "+") != info.audio_url:
         raise MusicCardException("QQ 音乐卡片播放地址不一致")
     if music.jumpUrl != info.source_url:
         raise MusicCardException("QQ 音乐卡片跳转地址不一致")
