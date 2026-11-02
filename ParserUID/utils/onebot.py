@@ -1,4 +1,4 @@
-"""OneBotUID 可选集成：贴表情与 QQ 音乐卡片发送。"""
+"""OneBotUID 可选集成：对触发解析的消息贴表情。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ _ONEBOT_API_MODULES = (
 )
 _ONEBOT_EMOJI_ID = "289"
 _ONEBOT_CALL_TIMEOUT = 5.0
-_ONEBOT_SEND_TIMEOUT = 20.0
 
 
 class _EmojiLikeParams(TypedDict):
@@ -59,45 +58,6 @@ def onebot_call_api_available() -> bool:
     return _load_onebot_api() is not None
 
 
-async def send_music_card(ev: Event, signed_json: str) -> bool:
-    """通过 OneBotUID 发送原始签名 JSON。"""
-    direct = ev.user_type == "direct"
-    target_id = ev.user_id if direct else ev.group_id
-    if not target_id:
-        logger.warning("[Parser·音乐卡片] 当前会话缺少目标 ID，回退音频")
-        return False
-
-    api = _load_onebot_api()
-    if api is None:
-        logger.warning("[Parser·音乐卡片] OneBotUID 接口不可用，回退音频")
-        return False
-
-    action = "send_private_msg" if direct else "send_group_msg"
-    id_key = "user_id" if direct else "group_id"
-    params: dict[str, object] = {
-        id_key: _id_param(target_id),
-        "message": [{"type": "json", "data": {"data": signed_json}}],
-    }
-    try:
-        response = await api.call_bot_api(
-            action,
-            params,
-            ev.bot_self_id,
-            _ONEBOT_SEND_TIMEOUT,
-        )
-    except api.OneBotApiError as exc:
-        logger.warning(f"[Parser·音乐卡片] OneBotUID 接口调用失败 | error_type={type(exc).__name__}")
-        return False
-    except Exception as exc:
-        logger.warning(f"[Parser·音乐卡片] OneBotUID 发送异常 | error_type={type(exc).__name__}")
-        return False
-    if response is None:
-        logger.warning("[Parser·音乐卡片] OneBotUID 未返回发送结果，回退音频")
-        return False
-    logger.info("[Parser·音乐卡片] 已交给 OneBotUID 发送")
-    return True
-
-
 async def react_to_trigger_message(ev: Event) -> bool:
     """通过 OneBotUID 对触发解析的消息贴睁眼表情。"""
     if not ev.msg_id:
@@ -129,7 +89,3 @@ async def react_to_trigger_message(ev: Event) -> bool:
 
     logger.debug("[Parser·贴表情] 已请求 OneBotUID 贴睁眼表情")
     return True
-
-
-def _id_param(value: str) -> str | int:
-    return int(value) if value.isdigit() else value

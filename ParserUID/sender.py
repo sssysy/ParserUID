@@ -24,7 +24,7 @@ from .config import (
     max_video_duration_seconds,
 )
 from .utils.ffmpeg import probe_duration
-from .utils.onebot import send_music_card, onebot_call_api_available
+from .utils.onebot import onebot_call_api_available
 from .render.models import PreviewCard
 from .utils.exceptions import ResourceLimitException, sanitize_error_text
 from .utils.music_card import MusicCardInfo, sign_music_card
@@ -250,7 +250,8 @@ async def _send_with_music_cards(
                     logger.warning(f"[Parser·音乐卡片] 签名失败，回退音频 | error_type={type(exc).__name__}")
                 else:
                     await flush_pending()
-                    if await send_music_card(bot.ev, signed_json):
+                    if await _send(bot, _music_card_segment(signed_json)):
+                        logger.info("[Parser·音乐卡片] 已交给 OneBotUID 发送")
                         sent = True
                         continue
 
@@ -264,6 +265,11 @@ async def _send_with_music_cards(
         failure_sent = await _send(bot, MessageSegment.text("\n".join(failures)))
         sent = failure_sent or sent
     return sent
+
+
+def _music_card_segment(signed_json: str) -> Message:
+    """把签名 JSON 包装成核心 card 段，交由 OneBotUID 透传。"""
+    return Message(type="card", data={"type": "json", "content": signed_json})
 
 
 @dataclass(frozen=True, slots=True)
