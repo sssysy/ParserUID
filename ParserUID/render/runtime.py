@@ -26,6 +26,7 @@ from .models import (
     PreviewCard,
     CommentReply,
 )
+from ..config import large_render_compression_enabled
 from .helpers import (
     MAX_RENDER_EDGE,
     encode_png,
@@ -56,7 +57,9 @@ PREVIEW_LIGHT_BACKGROUND: Final = (248, 250, 252)
 PREVIEW_DARK_BACKGROUND: Final = (8, 9, 11)
 PREVIEW_LIGHT_DOT: Final = (148, 163, 184)
 PREVIEW_DARK_DOT: Final = (226, 232, 240)
-_RENDER_VERSION: Final = "18"
+LARGE_RENDER_COMPRESSION_BYTES: Final = 2 * 1024 * 1024
+LARGE_RENDER_JPEG_QUALITY: Final = 90
+_RENDER_VERSION: Final = "19"
 
 
 def _template_candidates(card: PreviewCard, manifest: SkinManifest) -> tuple[str, ...]:
@@ -391,13 +394,34 @@ def _apply_preview_cutoff(image_bytes: bytes, *, video: bool) -> bytes:
     return encode_png(image)
 
 
+def _compress_large_render(image_bytes: bytes, *, video: bool) -> bytes:
+    """把超过 2 MB 的渲染图转换为 JPEG。"""
+    if len(image_bytes) <= LARGE_RENDER_COMPRESSION_BYTES:
+        return image_bytes
+    with Image.open(io.BytesIO(image_bytes)) as source:
+        image = source.convert("RGBA")
+    background = PREVIEW_DARK_BACKGROUND if video else PREVIEW_LIGHT_BACKGROUND
+    canvas = Image.new("RGB", image.size, background)
+    canvas.paste(image, mask=image.getchannel("A"))
+    output = io.BytesIO()
+    canvas.save(
+        output,
+        format="JPEG",
+        quality=LARGE_RENDER_JPEG_QUALITY,
+        subsampling=2,
+        optimize=True,
+        progressive=True,
+    )
+    return output.getvalue()
+
+
 async def render_preview(
     card: PreviewCard,
     *,
     skin: str = "default",
     proxy: str | None = None,
 ) -> Path:
-    """准备资源，用指定皮肤渲染卡片，并返回缓存的 PNG 路径。"""
+    """准备资源，用指定皮肤渲染卡片，并返回缓存的图片路径。"""
     return await _render_preview(card, skin=skin, proxy=proxy)
 
 
@@ -405,9 +429,11 @@ async def _render_preview(card: PreviewCard, *, skin: str, proxy: str | None) ->
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     dark = card.is_video
     digest = _digest_card(card, skin)
-    path = CACHE_DIR / f"{sheet_name(dark)}_{digest}.png"
-    if path.is_file():
-        return path
+    cache_stem = f"{sheet_name(dark)}_{digest}"
+    for suffix in (".jpg", ".png"):
+        cached = CACHE_DIR / f"{cache_stem}{suffix}"
+        if cached.is_file():
+            return cached
 
     ready_card = await ensure_card_assets(card, proxy=proxy)
     package = await asyncio.to_thread(resolve_skin_pack, skin, builtin_dir=PACK_DIR)
@@ -425,6 +451,10 @@ async def _render_preview(card: PreviewCard, *, skin: str, proxy: str | None) ->
     )
 
     image_bytes = await asyncio.to_thread(_render_prepared_html, html, video=dark)
+    if large_render_compression_enabled():
+        image_bytes = await asyncio.to_thread(_compress_large_render, image_bytes, video=dark)
+    suffix = ".jpg" if image_bytes.startswith(b"\xff\xd8\xff") else ".png"
+    path = CACHE_DIR / f"{cache_stem}{suffix}"
     await asyncio.to_thread(path.write_bytes, image_bytes)
     return path
 

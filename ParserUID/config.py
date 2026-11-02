@@ -40,6 +40,11 @@ CONFIG_DEFAULT: dict[str, GSC] = {
         desc="关闭后，解析器调用 send_info() 时不再渲染和发送预览卡片。",
         data=True,
     ),
+    "compress_large_render": GsBoolConfig(
+        title="渲染图过大进行压缩",
+        desc="开启后，渲染图超过 2 MB 时转换为 JPEG。",
+        data=False,
+    ),
     "send_parse_result": GsBoolConfig(
         title="发送解析结果",
         desc="关闭后，解析器调用 result() 时丢弃解析结果，不再发送媒体内容。",
@@ -224,6 +229,11 @@ def card_image_limit() -> int:
 def render_preview_enabled() -> bool:
     """返回是否渲染并发送解析器提供的预览卡片。"""
     return bool(parser_config.get_config("send_render_preview").data)
+
+
+def large_render_compression_enabled() -> bool:
+    """返回是否把超过 2 MB 的渲染图转换为 JPEG。"""
+    return bool(parser_config.get_config("compress_large_render").data)
 
 
 def parse_result_enabled() -> bool:
