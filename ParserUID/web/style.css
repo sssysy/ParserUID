@@ -578,11 +578,6 @@ svg {
   scrollbar-gutter: stable;
 }
 
-.detail-pane.has-open-select {
-  overflow: clip;
-  scrollbar-gutter: auto;
-}
-
 .detail-shell.is-entering {
   animation: detail-in var(--md-sys-motion-duration-medium4)
     var(--md-sys-motion-easing-emphasized) both;

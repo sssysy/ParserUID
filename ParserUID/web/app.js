@@ -761,7 +761,6 @@
       menu.hidden = true;
       trigger.setAttribute("aria-expanded", "false");
       wrapper.classList.remove("is-open");
-      refs.parserDetail.classList.remove("has-open-select");
       if (restoreFocus) trigger.focus();
     }
 
@@ -774,7 +773,6 @@
       menu.hidden = false;
       trigger.setAttribute("aria-expanded", "true");
       wrapper.classList.add("is-open");
-      refs.parserDetail.classList.add("has-open-select");
       const rect = trigger.getBoundingClientRect();
       const estimatedHeight = Math.min(options.length * 48 + 16, 360);
       menu.classList.toggle(
