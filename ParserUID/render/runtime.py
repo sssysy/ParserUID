@@ -59,7 +59,7 @@ PREVIEW_LIGHT_DOT: Final = (148, 163, 184)
 PREVIEW_DARK_DOT: Final = (226, 232, 240)
 LARGE_RENDER_COMPRESSION_BYTES: Final = 2 * 1024 * 1024
 LARGE_RENDER_JPEG_QUALITY: Final = 90
-_RENDER_VERSION: Final = "19"
+_RENDER_VERSION: Final = "20"
 
 
 def _template_candidates(card: PreviewCard, manifest: SkinManifest) -> tuple[str, ...]:

@@ -368,7 +368,7 @@ class BilibiliParser(BaseParser):
             page_title = info.title
             if len(pages) > 1:
                 page_title = f"{info.title} | 分集 - {selected.part}"
-            cover = clean_cover(selected.first_frame) or info.cover_url
+            cover = info.cover_url
         if not cid:
             raise ParseException("视频分集信息缺失")
 
