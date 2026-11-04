@@ -90,7 +90,7 @@ class NeteaseParser(BaseParser):
         )
         contents: list[ContentItem] = [item]
         if lyric:
-            contents.append(self.create_text_content(lyric))
+            contents.append(self.create_lyric_content(lyric))
         return self.result(contents)
 
     def _quality_preference(self) -> QualityLevel:

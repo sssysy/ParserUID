@@ -27,6 +27,7 @@ from ..utils.models import (
     TextContent,
     AudioContent,
     ImageContent,
+    LyricContent,
     VideoContent,
     DynamicContent,
     LivePhotoContent,
@@ -316,6 +317,9 @@ class BaseParser:
 
     def create_text_content(self, text: str) -> TextContent:
         return TextContent(text)
+
+    def create_lyric_content(self, text: str) -> LyricContent:
+        return LyricContent(text)
 
     def create_image_content(
         self,

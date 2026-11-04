@@ -26,7 +26,12 @@ from .config import (
 )
 from .utils.onebot import react_to_trigger_message
 from .parsers.config import ParserItemConfig
-from .utils.exceptions import ParseException, format_user_error, sanitize_error_text
+from .utils.exceptions import (
+    ParseException,
+    format_user_error,
+    sanitize_error_text,
+    format_timeout_error,
+)
 
 
 class Description(Protocol):
@@ -373,7 +378,7 @@ class ParserRuntime:
                 f"[Parser·解析] 超时 | parser={matched.keyword} | "
                 f"elapsed={elapsed:.1f}s | timeout={_require_timeout(self._timeout):.1f}s"
             )
-            await self._notify_error(bot, "解析超时，请稍后再试")
+            await self._notify_error(bot, format_timeout_error(matched.parser.platform.display_name))
         except ParseException as exc:
             elapsed = self._clock() - started_at
             error_text = sanitize_error_text(str(exc))
@@ -383,7 +388,7 @@ class ParserRuntime:
                 f"[Parser·解析] 业务异常 | parser={matched.keyword} | "
                 f"error_type={type(exc).__name__} | elapsed={elapsed:.1f}s | error={error_text}"
             )
-            await self._notify_error(bot, format_user_error(exc))
+            await self._notify_error(bot, format_user_error(exc, matched.parser.platform.display_name))
         except Exception as exc:
             elapsed = self._clock() - started_at
             error_text = sanitize_error_text(str(exc))
@@ -392,7 +397,7 @@ class ParserRuntime:
                 f"[Parser·解析] 未预期异常 | parser={matched.keyword} | "
                 f"error_type={type(exc).__name__} | elapsed={elapsed:.1f}s | error={error_text}",
             )
-            await self._notify_error(bot, format_user_error(exc))
+            await self._notify_error(bot, format_user_error(exc, matched.parser.platform.display_name))
 
     async def _parse_and_send(self, bot: Bot, ev: Event, matched: ParserMatch) -> None:
         async def desc_sink(description: Description) -> None:

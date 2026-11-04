@@ -133,7 +133,7 @@ class KugouParser(BaseParser):
         )
         items: list[ContentItem] = [content]
         if lyric:
-            items.append(self.create_text_content(lyric))
+            items.append(self.create_lyric_content(lyric))
         return self.result(items)
 
     def _active_profile(self) -> ApiProfile:

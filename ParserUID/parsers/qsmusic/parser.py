@@ -90,7 +90,7 @@ class QSMusicParser(BaseParser):
 
         items: list[ContentItem] = [audio]
         if lyric:
-            items.append(self.create_text_content(lyric))
+            items.append(self.create_lyric_content(lyric))
         return self.result(items)
 
     async def _fetch_share_page(self, url: str) -> str:

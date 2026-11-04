@@ -185,12 +185,7 @@ class JMComicParser(BaseParser):
     async def _parse(self, searched: re.Match[str]) -> Sequence[ContentItem]:
         comic_id = searched.group("comic_id").lstrip("0")
         if not comic_id:
-            await self.send_info(
-                title="错误",
-                card_type="common",
-                extra_info="JM 号不能为空",
-            )
-            return ()
+            raise ParseException("JM 号不能为空")
 
         option = self._get_option()
         proxies, headers = self._client_options()
@@ -200,12 +195,7 @@ class JMComicParser(BaseParser):
             try:
                 album_detail = await jm_client.get_album_detail(comic_id)
             except MissingAlbumPhotoException:
-                await self.send_info(
-                    title="错误",
-                    card_type="common",
-                    extra_info="当前 JM 号不存在",
-                )
-                return ()
+                raise ParseException("当前 JM 号不存在") from None
             except JmcomicException as exc:
                 raise ParseException("获取 jm 详情遇到问题") from exc
 

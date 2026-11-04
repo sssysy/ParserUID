@@ -47,6 +47,14 @@ class TextContent:
         return self._text
 
 
+class LyricContent(TextContent):
+    """歌词文本项；音乐卡片已发送时由发送层跳过。"""
+
+    @property
+    def is_lyric(self) -> Literal[True]:
+        return True
+
+
 class MediaContent:
     """可惰性加载本地路径的媒体内容基类。"""
 

@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-DEFAULT_USER_ERROR = "解析失败，请稍后再试"
+DEFAULT_USER_ERROR = "请稍后再试"
+DEFAULT_TIMEOUT_ERROR = "解析超时，请稍后再试"
 USER_ERROR_MAX_LENGTH = 300
 
 _URL_RE = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
@@ -75,15 +76,24 @@ def sanitize_error_text(text: str, *, hide_local_paths: bool = False) -> str:
     return normalized
 
 
-def format_user_error(exc: Exception) -> str:
-    """把业务异常转换为可安全发送给用户的简短提示。"""
+def format_user_error(exc: Exception, platform_display_name: str) -> str:
+    """把业务异常转换为带平台名的可安全发送提示。"""
     if not isinstance(exc, ParseException):
-        return DEFAULT_USER_ERROR
+        return _format_user_error(platform_display_name, DEFAULT_USER_ERROR)
 
     detail = sanitize_error_text(exc.message, hide_local_paths=True)
     if not detail or detail == "解析失败":
-        return DEFAULT_USER_ERROR
-    return _truncate(detail, USER_ERROR_MAX_LENGTH)
+        detail = DEFAULT_USER_ERROR
+    return _format_user_error(platform_display_name, _truncate(detail, USER_ERROR_MAX_LENGTH))
+
+
+def format_timeout_error(platform_display_name: str) -> str:
+    """生成带平台名的固定超时提示。"""
+    return _format_user_error(platform_display_name, DEFAULT_TIMEOUT_ERROR)
+
+
+def _format_user_error(platform_display_name: str, detail: str) -> str:
+    return f"{platform_display_name} 解析失败：{detail}"
 
 
 def _redact_url(matched: re.Match[str]) -> str:

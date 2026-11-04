@@ -83,6 +83,12 @@ class MusicCardContentProtocol(Protocol):
     music_card: MusicCardInfo | None
 
 
+@runtime_checkable
+class LyricContentProtocol(TextContentProtocol, Protocol):
+    @property
+    def is_lyric(self) -> Literal[True]: ...
+
+
 ContentItem: TypeAlias = TextContentProtocol | MediaContentProtocol
 
 
@@ -224,6 +230,7 @@ async def _send_with_music_cards(
     failures: list[str] = []
     pending: list[Message] = []
     pending_count = 0
+    card_sent = False
 
     async def flush_pending() -> None:
         nonlocal sent, pending_count
@@ -241,18 +248,20 @@ async def _send_with_music_cards(
         pending_count = 0
 
     for item in contents:
+        if card_sent and isinstance(item, LyricContentProtocol):
+            continue
         if item.kind() == "audio" and isinstance(item, MusicCardContentProtocol):
             info = item.music_card
             if info is not None:
                 try:
                     signed_json = await sign_music_card(info)
                 except Exception as exc:
-                    logger.warning(f"[Parser·音乐卡片] 签名失败，回退音频 | error_type={type(exc).__name__}")
+                    logger.warning(f"[Parser·音乐卡片] 签名失败，继续发送音频 | error_type={type(exc).__name__}")
                 else:
                     await flush_pending()
                     if await send_music_card(bot.ev, signed_json):
                         sent = True
-                        continue
+                        card_sent = True
 
         built = await _build_single_content(item)
         pending.extend(built.segments)

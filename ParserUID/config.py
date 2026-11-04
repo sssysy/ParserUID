@@ -247,7 +247,7 @@ def music_as_voice_enabled() -> bool:
 
 
 def qq_music_card_enabled() -> bool:
-    """返回是否尝试用 QQ 音乐卡片替代解析出的音频。"""
+    """返回是否在发送音频的同时附带 QQ 音乐卡片。"""
     return bool(parser_config.get_config("send_qq_music_card").data)
 
 

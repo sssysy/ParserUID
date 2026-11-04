@@ -64,12 +64,12 @@ async def send_music_card(ev: Event, signed_json: str) -> bool:
     direct = ev.user_type == "direct"
     target_id = ev.user_id if direct else ev.group_id
     if not target_id:
-        logger.warning("[Parser·音乐卡片] 当前会话缺少目标 ID，回退音频")
+        logger.warning("[Parser·音乐卡片] 当前会话缺少目标 ID，跳过卡片")
         return False
 
     api = _load_onebot_api()
     if api is None:
-        logger.warning("[Parser·音乐卡片] OneBotUID 接口不可用，回退音频")
+        logger.warning("[Parser·音乐卡片] OneBotUID 接口不可用，跳过卡片")
         return False
 
     action = "send_private_msg" if direct else "send_group_msg"
@@ -86,13 +86,13 @@ async def send_music_card(ev: Event, signed_json: str) -> bool:
             _ONEBOT_SEND_TIMEOUT,
         )
     except api.OneBotApiError as exc:
-        logger.warning(f"[Parser·音乐卡片] OneBotUID 接口调用失败 | error_type={type(exc).__name__}")
+        logger.warning(f"[Parser·音乐卡片] OneBotUID 接口调用失败，跳过卡片 | error_type={type(exc).__name__}")
         return False
     except Exception as exc:
-        logger.warning(f"[Parser·音乐卡片] OneBotUID 发送异常 | error_type={type(exc).__name__}")
+        logger.warning(f"[Parser·音乐卡片] OneBotUID 发送异常，跳过卡片 | error_type={type(exc).__name__}")
         return False
     if response is None:
-        logger.warning("[Parser·音乐卡片] OneBotUID 未返回发送结果，回退音频")
+        logger.warning("[Parser·音乐卡片] OneBotUID 未返回发送结果，跳过卡片")
         return False
     logger.info("[Parser·音乐卡片] 已交给 OneBotUID 发送")
     return True

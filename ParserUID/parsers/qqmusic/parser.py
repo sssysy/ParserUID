@@ -99,7 +99,7 @@ class QQMusicParser(BaseParser):
             )
         ]
         if lyric:
-            contents.append(self.create_text_content(lyric))
+            contents.append(self.create_lyric_content(lyric))
         return self.result(contents)
 
     async def _credential(self, client: httpx.AsyncClient) -> QqCredential | None:
