@@ -3,7 +3,7 @@
 ## 架构与注册
 
 - [ ] 解析器是 `ParserUID/parsers/<name>/` 包，不在 `parser.py` 增加平台分支。
-- [ ] 第三方解析器位于 `data/ParserUID/thirdparty/parsers/<name>/`。
+- [ ] 第三方解析器位于 `data/ParserUID/addons/parsers/<name>/`。
 - [ ] `__init__.py` 导出 `PARSER`，且不执行 I/O。
 - [ ] 目录名、`config.json.name`、`PARSER.platform.name` 一致。
 - [ ] 没有通过修改 `parsers/__init__.py`、全局配置或注册清单添加平台。
@@ -68,7 +68,7 @@
 
 ## 第三方解析器
 
-- [ ] 只扫描 `data/ParserUID/thirdparty/parsers/` 的直接子目录。
+- [ ] 只扫描 `data/ParserUID/addons/parsers/` 的直接子目录。
 - [ ] 不把第三方目录加入全局 `sys.path`。
 - [ ] 只接受受限目录内的相对路径。
 - [ ] 与内置解析器同名时拒绝注册。

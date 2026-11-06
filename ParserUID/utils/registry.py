@@ -11,8 +11,8 @@ from typing import TypeAlias
 from pathlib import Path
 
 from gsuid_core.logger import logger
-from gsuid_core.data_store import get_res_path
 
+from ..config import THIRDPARTY_PARSERS_DIR
 from ..parsers.base import BaseParser
 from ..parsers.config import (
     ParserManifest,
@@ -86,7 +86,7 @@ def get_builtin_parsers_dir() -> Path:
 
 def get_thirdparty_parsers_dir() -> Path:
     """返回第三方解析器数据根目录。"""
-    path = get_res_path("ParserUID") / "thirdparty" / "parsers"
+    path = THIRDPARTY_PARSERS_DIR
     path.mkdir(parents=True, exist_ok=True)
     return path
 

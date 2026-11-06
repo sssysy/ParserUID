@@ -19,6 +19,8 @@ from gsuid_core.models import Event
 from gsuid_core.server import on_core_start, on_core_shutdown
 
 from .config import (
+    THIRDPARTY_SKINS_DIR,
+    THIRDPARTY_PARSERS_DIR,
     parser_config,
     trigger_feedback_text,
     trigger_feedback_enabled,
@@ -500,7 +502,14 @@ async def on_parser_message(bot: Bot, ev: Event) -> None:
 
 @on_core_start
 async def _initialize_parser_runtime() -> None:
+    await asyncio.to_thread(_ensure_addons_dirs)
     await get_runtime()
+
+
+def _ensure_addons_dirs() -> None:
+    """启动时创建第三方资源目录，方便管理员直接放入资源。"""
+    THIRDPARTY_PARSERS_DIR.mkdir(parents=True, exist_ok=True)
+    THIRDPARTY_SKINS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @on_core_shutdown

@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 
 from gsuid_core.logger import logger
-from gsuid_core.data_store import get_res_path
+
+from ..config import THIRDPARTY_SKINS_DIR
 
 BUILTIN_SKIN_DIR: Final = Path(__file__).resolve().parent / "pack"
 _SKIN_NAME_ALLOWED: Final = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
@@ -39,7 +40,7 @@ class SkinPackage:
 
 def get_thirdparty_skins_dir() -> Path:
     """返回第三方皮肤数据根目录并确保其存在。"""
-    path = get_res_path("ParserUID") / "thirdparty" / "renderskinpacks"
+    path = THIRDPARTY_SKINS_DIR
     path.mkdir(parents=True, exist_ok=True)
     return path
 

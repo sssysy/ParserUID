@@ -252,7 +252,7 @@ else:
 
 ### 2. `help.json` 数据规范
 
-文件路径：`ParserUID/parsers/<name>/help.json`（内置）或 `data/ParserUID/thirdparty/parsers/<name>/help.json`（第三方）。
+文件路径：`ParserUID/parsers/<name>/help.json`（内置）或 `data/ParserUID/addons/parsers/<name>/help.json`（第三方）。
 
 结构模板：
 

@@ -43,7 +43,7 @@ ParserUID/parsers/<name>/
 第三方解析器目录：
 
 ```text
-data/ParserUID/thirdparty/parsers/<name>/
+data/ParserUID/addons/parsers/<name>/
 ├── __init__.py
 ├── config.json
 ├── parser.py

@@ -19,6 +19,8 @@ PLUGIN_NAME: Final = "ParserUID"
 DATA_DIR: Final = get_res_path(PLUGIN_NAME)
 CONFIG_PATH: Final = DATA_DIR / "config.json"
 RENDER_SETTINGS_PATH: Final = DATA_DIR / "render_settings.json"
+THIRDPARTY_PARSERS_DIR: Final = DATA_DIR / "addons" / "parsers"
+THIRDPARTY_SKINS_DIR: Final = DATA_DIR / "addons" / "skins"
 
 DEFAULT_SKIN_PACK: Final = "default"
 MAX_CARD_IMAGE_BLOCKS: Final = 9

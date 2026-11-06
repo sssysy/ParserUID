@@ -82,10 +82,10 @@ data/ParserUID/
 ├── config.json                         # 插件全局配置
 ├── parser_config/                      # 各解析器用户配置
 │   └── <name>.json
-├── thirdparty/
+├── addons/
 │   ├── parsers/                        # 第三方解析器包
 │   │   └── <name>/                     # 结构与内置 parsers/<name>/ 相同
-│   └── renderskinpacks/                # 第三方皮肤包
+│   └── skins/                          # 第三方皮肤包
 │       └── <name>/                     # 结构为内置 render/pack/<name>/
 ├── cache/                              # 解析结果缓存
 ├── img_cache/                          # 图片和封面缓存
@@ -96,7 +96,7 @@ data/ParserUID/
 目录和文件规则：
 
 - 一个解析平台只允许一个 `parsers/<name>/` 包。目录名、`config.json.name`、`PARSER.platform.name` 必须完全一致。
-- 内置解析器只放 `ParserUID/parsers/`；第三方解析器只放 `data/ParserUID/thirdparty/parsers/`；第三方皮肤包只放 `data/ParserUID/thirdparty/renderskinpacks/`。
+- 内置解析器只放 `ParserUID/parsers/`；第三方解析器只放 `data/ParserUID/addons/parsers/`；第三方皮肤包只放 `data/ParserUID/addons/skins/`。
 - 每个解析器包的 `__init__.py` 必须导出 `PARSER`，该对象必须是 `BaseParser` 子类。不得在导入时发起网络请求、启动浏览器或等待长时间初始化。
 - `parsers/__init__.py` 不逐个导入平台，不维护平台清单，不负责注册；注册由 `utils/registry.py` 扫描完成。
 - 单个平台的复杂逻辑留在该平台包内，按职责拆分。跨平台代码放 `utils/`，不得复制到多个平台。
@@ -149,7 +149,7 @@ async def on_parser_message(bot: Bot, ev: Event) -> None: ...
 
 ### 4.1 启动注册
 
-1. 在 `utils/registry.py` 依次扫描内置 `ParserUID/parsers/*/` 和第三方 `data/ParserUID/thirdparty/parsers/*/` 的直接子目录。
+1. 在 `utils/registry.py` 依次扫描内置 `ParserUID/parsers/*/` 和第三方 `data/ParserUID/addons/parsers/*/` 的直接子目录。
 2. 只接受同时存在 `config.json` 和可导入 `__init__.py` 的目录。
 3. 校验目录名、配置名、`PARSER.platform.name` 三者一致。
 4. 校验每个 `@handle()` 的关键词全局唯一；重复时拒绝冲突注册并记录两个平台，不得静默覆盖。
@@ -242,7 +242,7 @@ GsCore 的 `Bot.send()` 不向插件返回适配器发送结果。只有显式�
 
 皮肤包规则：
 
-- 内置皮肤包是 `ParserUID/render/pack/<name>/` 下的独立目录；第三方皮肤包是 `data/ParserUID/thirdparty/renderskinpacks/<name>/` 下的独立目录。两者都必须提供 `manifest.json`。
+- 内置皮肤包是 `ParserUID/render/pack/<name>/` 下的独立目录；第三方皮肤包是 `data/ParserUID/addons/skins/<name>/` 下的独立目录。两者都必须提供 `manifest.json`。
 - `manifest.json` 至少包含 `name`、`display_name`、`version` 和 `templates`。
   `templates` 必须包含 `default`，可声明 `common`、`video` 和平台专属模板。
   所有模板名必须是皮肤目录内的相对 `.html` 路径，不能是绝对路径或外部路径。
@@ -460,7 +460,7 @@ python -m basedpyright ParserUID
       不执行外部脚本、不直接发送消息。
 - [ ] 下载经过 `utils/downloader.py`，底层复用框架 `download_file.download`，有大小、时长、超时和有限重试限制。
 - [ ] 用户配置、Cookie、缓存和临时文件只写 `data/ParserUID/`。
-- [ ] 内置解析器只在源码包，第三方解析器只在 `data/ParserUID/thirdparty/parsers/`，第三方皮肤只在 `data/ParserUID/thirdparty/renderskinpacks/`。
+- [ ] 内置解析器只在源码包，第三方解析器只在 `data/ParserUID/addons/parsers/`，第三方皮肤只在 `data/ParserUID/addons/skins/`。
 - [ ] 网页配置页可控制解析器启停和选择皮肤包；普通全局配置项与第 7 节一致。
 - [ ] 下载失败提示固定开启，卡片正文图片上限固定为 9。
 - [ ] 未添加任何 AI 入口，除非用户明确要求接入 AI。

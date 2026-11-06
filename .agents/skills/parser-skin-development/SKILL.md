@@ -33,7 +33,7 @@ description: >
 6. `pytakumi` 出图，并按内容摘要缓存 PNG。
 
 内置皮肤从 `ParserUID/render/pack/<name>/` 加载，第三方皮肤从
-`data/ParserUID/thirdparty/renderskinpacks/<name>/` 加载。网页配置页会展示
+`data/ParserUID/addons/skins/<name>/` 加载。网页配置页会展示
 来源和版本，切换第三方皮肤前要求管理员确认。内置与第三方同名时保留内置，
 第三方包会被拒绝。
 

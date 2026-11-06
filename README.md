@@ -67,14 +67,14 @@
 ## 丨添加其他解析器 / 皮肤包
 #### 解析器添加和编写
 > 编写可以使用本插件 [`parser-development`](.agents/skills/parser-development) 技能让 ai agent 适配对应网站
-> 编写完毕后可以将第三方解析器包放到 `data\ParserUID\thirdparty\parsers` 文件夹中
+> 编写完毕后可以将第三方解析器包放到 `data\ParserUID\addons\parsers` 文件夹中
 > 插件会在启动时自动扫描此目录的解析器并注册
 >
 > **❤ 欢迎 PR 你适配的平台解析器到本项目中！❤**
 
 #### 皮肤包添加和编写
 > 编写可以使用本插件 [`parser-skin-development`](.agents\skills\parser-skin-development) 技能让 ai agent 进行编写
-> 编写完毕后可以将第三方皮肤包放到 `data\ParserUID\thirdparty\renderskinpacks\<皮肤名>` 文件夹中
+> 编写完毕后可以将第三方皮肤包放到 `data\ParserUID\addons\skins\<皮肤名>` 文件夹中
 > 插件会在网页配置页读取时自动扫描该目录，选择第三方皮肤时要求管理员确认
 >
 > 插件提供为对应平台写专属皮肤的需求，仅需为对应平台准备html模板，然后在包中把对应模板命名为对应解析器相同内部名称，插件在触发卡片渲染时将优先调用专属平台卡片进行渲染

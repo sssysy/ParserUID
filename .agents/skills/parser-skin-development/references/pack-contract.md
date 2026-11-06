@@ -15,7 +15,7 @@ ParserUID/render/pack/<name>/
 ```
 
 `AGENTS.md` 约定的第三方皮肤目录是
-`data/ParserUID/thirdparty/renderskinpacks/<name>/`。
+`data/ParserUID/addons/skins/<name>/`。
 `render.registry.scan_skin_packs()` 会同时扫描内置和第三方目录，网页配置页
 只列出通过 manifest、目录名和模板文件校验的皮肤。内置与第三方同名时保留
 内置，第三方包会被拒绝。
