@@ -238,42 +238,31 @@ class BilibiliParser(BaseParser):
         url = normalize_url(searched.group(0))
         if not url.startswith("http"):
             url = f"https://{url}"
-        final_url = await self.get_final_url(url, headers=self._request_headers(url))
-        for keyword, (pattern, handler) in self._handlers.items():
-            if keyword not in final_url:
-                continue
-            matched = pattern.search(final_url)
-            if matched is not None:
-                return await handler(matched)
+        chain = await self.get_redirect_chain(url, headers=self._request_headers(url))
+        for page_url in reversed(chain):
+            for keyword, (pattern, handler) in self._handlers.items():
+                if keyword not in page_url:
+                    continue
+                if keyword.startswith("/") or keyword.lower().startswith("bv"):
+                    matched = pattern.search(page_url)
+                    if matched is not None:
+                        return await handler(matched)
         raise ParseException("短链跳转后未匹配到哔哩哔哩内容")
 
     @handle(
-        "/BV",
-        r"bilibili\.com(?:/video)?/(?P<bvid>BV[0-9A-Za-z]{10})"
-        r"(?:[?&]p=(?P<page>\d{1,3}))?",
+        "/video/",
+        r"bilibili\.com/video/(?:(?P<avid>[aA][vV](?P<avid_digits>\d+))|(?P<bvid>[0-9A-Za-z]{8,15}))"
+        r"(?![0-9A-Za-z])/?(?:[?&]p=(?P<page>\d{1,3}))?",
     )
-    @handle(
-        "BV",
-        r"^(?P<bvid>BV[0-9A-Za-z]{10})(?:\s+(?P<page>\d{1,3}))?$",
-    )
-    async def _parse_bv(self, searched: re.Match[str]):
+    async def _parse_video_link(self, searched: re.Match[str]):
+        avid_digits = searched.group("avid_digits")
+        if avid_digits is not None:
+            avid = int(avid_digits)
+            page = int(searched.groupdict().get("page") or 1)
+            return await self._parse_video(bvid=av2bv(avid), avid=avid, page=page)
         bvid = searched.group("bvid")
         page = int(searched.groupdict().get("page") or 1)
         return await self._parse_video(bvid=bvid, page=page)
-
-    @handle(
-        "/av",
-        r"bilibili\.com(?:/video)?/av(?P<avid>\d{5,})"
-        r"(?:[?&]p=(?P<page>\d{1,3}))?",
-    )
-    @handle(
-        "av",
-        r"^av(?P<avid>\d{5,})(?:\s+(?P<page>\d{1,3}))?$",
-    )
-    async def _parse_av(self, searched: re.Match[str]):
-        avid = int(searched.group("avid"))
-        page = int(searched.groupdict().get("page") or 1)
-        return await self._parse_video(bvid=av2bv(avid), avid=avid, page=page)
 
     @handle("/dynamic/", r"bilibili\.com/dynamic/(?P<dynamic_id>\d+)")
     @handle("t.bili", r"t\.bilibili\.com/(?P<dynamic_id>\d+)")
@@ -479,15 +468,22 @@ class BilibiliParser(BaseParser):
     ) -> StreamSelection:
         if not cid:
             raise ParseException("视频分集信息缺失")
-        params = {
+        params: dict[str, str | int] = {
             "bvid": bvid,
-            "avid": aid or bv2av(bvid),
             "cid": cid,
             "qn": self.quality,
             "fnver": 0,
             "fnval": 4048,
             "fourk": 1,
         }
+        if aid:
+            params["avid"] = aid
+        else:
+            try:
+                params["avid"] = bv2av(bvid)
+            except ValueError:
+                # 8-15 位新视频号不能直接按旧 BV 编码反推，交给接口按 bvid 解析。
+                pass
         data: dict[str, object] | None = None
         message = "获取视频播放流失败"
         last_candidate: dict[str, object] | None = None

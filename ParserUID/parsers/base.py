@@ -227,12 +227,26 @@ class BaseParser:
         headers: dict[str, str] | None = None,
     ) -> str:
         """追踪完整重定向链条获取最终有效 URL。"""
+        chain = await self.get_redirect_chain(url, headers=headers)
+        return chain[-1]
+
+    async def get_redirect_chain(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> list[str]:
+        """返回包含入口与全部跳转页面的完整 URL 链。"""
         client = await self.get_client()
         try:
             response = await client.get(url, headers=headers)
-            return str(response.url)
         except Exception as exc:
             raise RedirectException(f"多次重定向解析失败：{exc}") from exc
+        chain = [str(history.url) for history in response.history]
+        final_url = str(response.url)
+        if not chain or chain[-1] != final_url:
+            chain.append(final_url)
+        return chain
 
     async def parse_with_redirect(
         self,
