@@ -47,6 +47,34 @@ def fmt_size(file_path: Path) -> str:
     return f"{size:.1f} GB"
 
 
+def format_size_bytes(value: int | float) -> str:
+    """把字节数换算为带单位的易读文本。"""
+    size = max(0.0, float(value))
+    unit = "B"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024.0 or unit == "TB":
+            break
+        size /= 1024.0
+    if unit == "B":
+        return f"{int(size)} B"
+    rounded = round(size, 1)
+    if rounded.is_integer():
+        return f"{int(rounded)} {unit}"
+    return f"{rounded:.1f} {unit}"
+
+
+def format_duration_seconds(value: int | float) -> str:
+    """把秒数换算为秒、分钟或小时加分钟的可读时长。"""
+    total = max(0, int(round(float(value))))
+    if total < 60:
+        return f"{total} 秒"
+    minutes, seconds = divmod(total, 60)
+    if minutes < 60:
+        return f"{minutes} 分钟" if seconds == 0 else f"{minutes} 分 {seconds} 秒"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} 小时" if minutes == 0 else f"{hours} 小时 {minutes} 分钟"
+
+
 def format_num(value: int | None) -> str:
     """将互动计数转换为万/亿等缩写展示。"""
     if value is None or value <= 0:

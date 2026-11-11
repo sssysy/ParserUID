@@ -19,6 +19,7 @@ from PIL import Image, UnidentifiedImageError
 from gsuid_core.logger import logger
 from gsuid_core.data_store import get_res_path
 
+from .utils import format_size_bytes
 from .ffmpeg import FFmpegUnavailable, exec_ffmpeg_cmd
 from ..config import max_file_size_bytes
 from .exceptions import DownloadException
@@ -143,7 +144,7 @@ class Downloader:
                     async for chunk in response.aiter_bytes(chunk_size=_CHUNK_SIZE):
                         total_downloaded += len(chunk)
                         if total_downloaded > max_bytes:
-                            raise DownloadException(f"文件大小超出限制（上限 {max_bytes} 字节）")
+                            raise DownloadException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
                         handle.write(chunk)
 
             if total_downloaded == 0:
@@ -308,7 +309,7 @@ class Downloader:
         if size <= 0:
             raise DownloadException("HLS 下载得到 0 字节文件")
         if size > max_bytes:
-            raise DownloadException(f"文件大小超出限制（上限 {max_bytes} 字节）")
+            raise DownloadException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
 
     async def download_with_ytdlp(
         self,
@@ -364,10 +365,10 @@ class Downloader:
                         if mkv_alt.is_file():
                             result_path = mkv_alt
                 if not result_path.is_file():
-                    raise DownloadException(f"文件大小超出限制（上限 {limit} 字节）")
+                    raise DownloadException(f"文件大小超出限制（上限 {format_size_bytes(limit)}）")
                 if result_path.stat().st_size > limit:
                     result_path.unlink(missing_ok=True)
-                    raise DownloadException(f"文件大小超出限制（上限 {limit} 字节）")
+                    raise DownloadException(f"文件大小超出限制（上限 {format_size_bytes(limit)}）")
                 return result_path
 
         return await asyncio.to_thread(_sync_ytdlp_run)

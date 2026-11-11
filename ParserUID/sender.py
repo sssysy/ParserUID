@@ -23,6 +23,7 @@ from .config import (
     max_audio_duration_seconds,
     max_video_duration_seconds,
 )
+from .utils.utils import format_size_bytes, format_duration_seconds
 from .utils.ffmpeg import probe_duration
 from .utils.onebot import send_music_card, onebot_call_api_available
 from .render.models import PreviewCard
@@ -363,7 +364,7 @@ async def _validate_media_limits(path: Path, duration: float, kind: MediaKind) -
     size = path.stat().st_size if path.is_file() else 0
     max_bytes = max_file_size_bytes()
     if size > max_bytes:
-        raise ResourceLimitException(f"文件大小超出限制（上限 {max_bytes // 1024 // 1024} MB）")
+        raise ResourceLimitException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
     if kind not in {"video", "audio"}:
         return
     limit = max_video_duration_seconds() if kind == "video" else max_audio_duration_seconds()
@@ -374,7 +375,7 @@ async def _validate_media_limits(path: Path, duration: float, kind: MediaKind) -
     if actual <= 0:
         return
     if actual > limit:
-        raise ResourceLimitException(f"{MEDIA_LABELS[kind]}时长超出限制（上限 {int(limit // 60)} 分钟）")
+        raise ResourceLimitException(f"{MEDIA_LABELS[kind]}时长超出限制（上限 {format_duration_seconds(limit)}）")
 
 
 def _media_segment(path: Path, kind: MediaKind, file_name: str | None = None) -> Message:
