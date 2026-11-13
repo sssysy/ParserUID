@@ -106,8 +106,8 @@
 
 # Instagram
 
-## 图文实况视频 | 解析只能解析出第一个视频
-- [ ] https://www.instagram.com/p/DfIqU_pE_uh/
+## 图文实况视频
+- [x] https://www.instagram.com/p/DfIqU_pE_uh/
 
 ## 视频
 - [x] https://www.instagram.com/reels/Degkqxlods_/
@@ -132,13 +132,13 @@
 
 # Pixiv
 
-## 插画 | 预览图无图片
+## 插画
 - [x] https://www.pixiv.net/artworks/139555691
 
-## 漫画 | 预览图无封面
+## 漫画
 - [x] https://www.pixiv.net/artworks/139855966
 
-## 小说 | 预览图无封面
+## 小说
 - [x] https://www.pixiv.net/novel/show.php?id=28299885
 
 # QQ音乐

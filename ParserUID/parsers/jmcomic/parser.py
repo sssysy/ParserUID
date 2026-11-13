@@ -243,6 +243,7 @@ class JMComicParser(BaseParser):
 
             send_mode = self.get_config_value("image_send_mode", "pdf")
             download_photos = False
+            page_limit_exceeded = False
             if send_mode != "ignore":
                 page_count = len(photo_detail)
                 try:
@@ -251,6 +252,7 @@ class JMComicParser(BaseParser):
                     max_page = 50
                 if max_page and page_count > max_page:
                     extra_info += f"\n当前漫画页数 {page_count}，超过最大页数 {max_page}，跳过下载。"
+                    page_limit_exceeded = True
                 else:
                     download_photos = True
 
@@ -265,6 +267,9 @@ class JMComicParser(BaseParser):
                 comments=comments,
                 url=album_url,
             )
+
+            if page_limit_exceeded:
+                raise ParseException("超过最大页数")
 
             if download_photos and send_mode == "pdf":
                 final_contents.append(
