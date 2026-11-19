@@ -8,7 +8,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
-from bs4.element import Tag
+from bs4.element import Tag, Comment, NavigableString
 
 from .models import (
     TelegramPoll,
@@ -466,15 +466,11 @@ def _parse_buttons(message: Tag) -> tuple[TelegramButton, ...]:
 def _parse_reactions(message: Tag) -> tuple[TelegramReaction, ...]:
     reactions: list[TelegramReaction] = []
     for node in message.select(".tgme_widget_message_reactions .tgme_reaction"):
-        full_text = _clean_text(node.get_text(" ", strip=True)) or ""
-        count = _last_child_text(node)
-        if not count:
-            matched = COUNT_RE.search(full_text)
-            count = matched.group(0) if matched is not None else ""
+        count = _reaction_count(node)
         if not count:
             continue
         classes = _class_tokens(node)
-        emoji_node = node.select_one("i.emoji b")
+        emoji_node = node.select_one("i.emoji b") or node.select_one("i.emoji")
         custom_emoji = node.select_one("tg-emoji")
         if "tgme_reaction_paid" in classes:
             label, kind = "⭐", "telegram_stars"
@@ -651,9 +647,22 @@ def _is_direct_file_url(value: str) -> bool:
     return path.startswith("/file/") or path.endswith(DIRECT_FILE_SUFFIXES)
 
 
-def _last_child_text(node: Tag) -> str | None:
-    children = node.find_all(recursive=False)
-    if not children:
-        return None
-    last = children[-1]
-    return _clean_text(last.get_text(" ", strip=True))
+def _reaction_count(node: Tag) -> str:
+    for child in reversed(node.contents):
+        if isinstance(child, Comment):
+            continue
+        if isinstance(child, Tag):
+            classes = _class_tokens(child)
+            if child.name == "tg-emoji" or "emoji" in classes or "icon" in classes:
+                continue
+            text = _clean_text(child.get_text(" ", strip=True))
+        elif isinstance(child, NavigableString):
+            text = _clean_text(str(child))
+        else:
+            continue
+        if not text:
+            continue
+        matched = COUNT_RE.search(text)
+        if matched is not None:
+            return matched.group(0)
+    return ""
