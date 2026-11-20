@@ -6,6 +6,10 @@ Plugins(
     allow_empty_prefix=False,
 )
 
+from .register import register_backup_hints  # noqa: E402
+
+register_backup_hints()
+
 from . import (  # noqa: E402
     help as help,
     cache as cache,
