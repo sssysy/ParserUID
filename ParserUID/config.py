@@ -11,7 +11,6 @@ from gsuid_core.utils.plugins_config.models import (
     GsIntConfig,
     GsStrConfig,
     GsBoolConfig,
-    GsTimeRConfig,
 )
 from gsuid_core.utils.plugins_config.gs_config import StringConfig
 
@@ -110,13 +109,8 @@ CONFIG_DEFAULT: dict[str, GSC] = {
     ),
     "cache_retention_days": GsIntConfig(
         title="缓存保留天数",
-        desc="定时清理时删除超过该天数的下载和渲染缓存文件；最小生效值为 1。",
+        desc="每小时定时清理超过该天数的下载和渲染缓存文件；0 表示不清理。",
         data=1,
-    ),
-    "cache_cleanup_time": GsTimeRConfig(
-        title="缓存清理时间",
-        desc="每天自动清理缓存的时间（时，分）。",
-        data=(2, 0),
     ),
 }
 
@@ -133,6 +127,7 @@ _LEGACY_CONFIG_KEYS: Final = (
     "card_image_limit",
     "node_enabled",
     "node_supported_sessions",
+    "cache_cleanup_time",
 )
 _SKIN_NAME_ALLOWED: Final = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 
@@ -288,17 +283,9 @@ def max_audio_duration_seconds() -> float:
 
 
 def cache_retention_seconds() -> int:
-    """返回缓存保留时长，单位秒。"""
-    days = max(1, int(parser_config.get_config("cache_retention_days").data))
+    """返回缓存保留时长，单位秒；0 表示不自动清理。"""
+    days = max(0, int(parser_config.get_config("cache_retention_days").data))
     return days * 24 * 60 * 60
-
-
-def cache_cleanup_hour_minute() -> tuple[int, int]:
-    """返回已约束到合法范围内的缓存清理时、分。"""
-    value = parser_config.get_config("cache_cleanup_time").data
-    hour = min(23, max(0, int(value[0])))
-    minute = min(59, max(0, int(value[1])))
-    return hour, minute
 
 
 def proxy_url() -> str | None:
