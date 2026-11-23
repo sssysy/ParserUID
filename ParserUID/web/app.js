@@ -265,15 +265,37 @@
 
   function isAccessDirty(parser) {
     return (
-      parser.access_mode !== parser.base_access_mode ||
+      Boolean(parser.whitelist_enabled) !== Boolean(parser.base_whitelist_enabled) ||
       valueKey(parser.whitelist) !== valueKey(parser.base_whitelist) ||
-      valueKey(parser.blacklist) !== valueKey(parser.base_blacklist)
+      valueKey(parser.blacklist) !== valueKey(parser.base_blacklist) ||
+      Boolean(parser.private_whitelist_enabled) !== Boolean(parser.base_private_whitelist_enabled) ||
+      valueKey(parser.private_whitelist) !== valueKey(parser.base_private_whitelist) ||
+      valueKey(parser.private_blacklist) !== valueKey(parser.base_private_blacklist)
     );
   }
 
   function normalizeGroupIds(values) {
     if (!Array.isArray(values)) return [];
-    return [...new Set(values.filter((value) => typeof value === "string" && /^\d+$/.test(value)))];
+    return [
+      ...new Set(
+        values
+          .filter((value) => typeof value === "string")
+          .map((value) => value.trim())
+          .filter((value) => /^\d+$/.test(value)),
+      ),
+    ];
+  }
+
+  function normalizeUserIds(values) {
+    if (!Array.isArray(values)) return [];
+    return [
+      ...new Set(
+        values
+          .filter((value) => typeof value === "string")
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0),
+      ),
+    ];
   }
 
   function currentParser() {
@@ -469,7 +491,7 @@
     const motionKey = `${query}|${visible
       .map(
         (parser) =>
-          `${parser.name}:${parser.access_mode}:${parser.whitelist.length}:${parser.blacklist.length}`,
+          `${parser.name}:${parser.whitelist_enabled}:${parser.whitelist.length}:${parser.blacklist.length}:${parser.private_whitelist_enabled}:${parser.private_whitelist.length}:${parser.private_blacklist.length}`,
       )
       .join("|")}`;
     const animateItems = state.accessMotionKey !== motionKey;
@@ -488,13 +510,15 @@
       if (animateItems) item.classList.add("is-entering");
 
       const copy = createElement("span", "parser-copy");
+      const groupSummary = parser.whitelist_enabled
+        ? `群聊白名单 ${parser.whitelist.length}${parser.whitelist.length === 0 ? " · 全拦" : ""}`
+        : `群聊黑名单 ${parser.blacklist.length}`;
+      const privateSummary = parser.private_whitelist_enabled
+        ? `私聊白名单 ${parser.private_whitelist.length}${parser.private_whitelist.length === 0 ? " · 全拦" : ""}`
+        : `私聊黑名单 ${parser.private_blacklist.length}`;
       copy.append(
         createElement("span", "parser-name", parser.display_name),
-        createElement(
-          "span",
-          "parser-meta",
-          `白名单 ${parser.whitelist.length} · 黑名单 ${parser.blacklist.length}${parser.access_mode === "white" && parser.whitelist.length === 0 ? " · 全部拦截" : ""}`,
-        ),
+        createElement("span", "parser-meta", `${groupSummary} / ${privateSummary}`),
       );
       item.append(copy);
       item.addEventListener("click", () => selectAccessParser(parser.name));
@@ -535,47 +559,52 @@
     }
   }
 
-  function createAccessModeRow(parser, kind) {
-    const isWhite = kind === "white";
+  function createAccessSwitchRow(parser, scope) {
+    const isPrivate = scope === "private";
+    const flagKey = isPrivate ? "private_whitelist_enabled" : "whitelist_enabled";
+    const title = isPrivate ? "启用私聊白名单" : "启用群聊白名单";
+    const hint = isPrivate
+      ? "开启后为白名单模式，仅白名单内的私聊用户可用；关闭后为黑名单模式，屏蔽黑名单内的私聊用户（黑名单为空则全部放行）。"
+      : "开启后为白名单模式，仅白名单内的群聊可用；关闭后为黑名单模式，屏蔽黑名单内的群聊（黑名单为空则全部放行）。";
     const row = createElement("div", "setting-row setting-row--switch");
     const copy = createElement("div", "setting-copy");
     copy.append(
-      createElement("span", "setting-label", isWhite ? "使用白名单" : "使用黑名单"),
-      createElement(
-        "p",
-        "setting-hint",
-        isWhite ? "开启后仅名单内的群聊可用。" : "开启后名单内的群聊不可用。",
-      ),
+      createElement("span", "setting-label", title),
+      createElement("p", "setting-hint", hint),
     );
     const control = createSwitch(
-      parser.access_mode === kind,
+      Boolean(parser[flagKey]),
       (checked) => {
-        if (checked) {
-          parser.access_mode = kind;
-        } else if (parser.access_mode === kind) {
-          parser.access_mode = "none";
-        }
+        parser[flagKey] = Boolean(checked);
         refreshAccessDirtyState();
         renderAccessDetail();
       },
-      isWhite ? "使用白名单" : "使用黑名单",
+      title,
     );
     row.append(copy, control);
     return row;
   }
 
-  function createGroupList(parser, kind) {
-    const listKey = kind === "white" ? "whitelist" : "blacklist";
+  function createAccessIdList(parser, scope, kind) {
+    const isPrivate = scope === "private";
+    const listKey = isPrivate
+      ? kind === "white"
+        ? "private_whitelist"
+        : "private_blacklist"
+      : kind === "white"
+        ? "whitelist"
+        : "blacklist";
+    const itemName = isPrivate ? "用户 ID" : "群号";
     const list = createElement("div", "group-list");
-    for (const groupId of parser[listKey]) {
+    for (const targetId of parser[listKey]) {
       const chip = createElement("span", "group-chip");
-      const label = createElement("span", "", groupId);
+      const label = createElement("span", "", targetId);
       const remove = createElement("button", "");
       remove.type = "button";
-      remove.setAttribute("aria-label", `移除群号 ${groupId}`);
+      remove.setAttribute("aria-label", `移除${itemName} ${targetId}`);
       remove.innerHTML = ICONS.close;
       remove.addEventListener("click", () => {
-        parser[listKey] = parser[listKey].filter((item) => item !== groupId);
+        parser[listKey] = parser[listKey].filter((item) => item !== targetId);
         refreshAccessDirtyState();
         renderAccessDetail();
       });
@@ -585,12 +614,21 @@
     return list;
   }
 
-  function createAccessSection(parser, kind) {
+  function createAccessSection(parser, scope, kind) {
+    const isPrivate = scope === "private";
     const isWhite = kind === "white";
-    const listKey = isWhite ? "whitelist" : "blacklist";
+    const listKey = isPrivate
+      ? isWhite
+        ? "private_whitelist"
+        : "private_blacklist"
+      : isWhite
+        ? "whitelist"
+        : "blacklist";
+    const scopeLabel = isPrivate ? "私聊" : "群聊";
+    const itemLabel = isPrivate ? "用户 ID" : "群号";
     const section = createElement("section", "field-section");
     const header = createElement("header", "field-section__header group-section-head");
-    header.append(createElement("h2", "", isWhite ? "白名单" : "黑名单"));
+    header.append(createElement("h2", "", `${scopeLabel}${isWhite ? "白名单" : "黑名单"}`));
     const clear = createElement("button", "text-button text-button--danger", "清空");
     clear.type = "button";
     clear.disabled = parser[listKey].length === 0;
@@ -606,44 +644,54 @@
     const field = createElement("div", "filled-field");
     const input = document.createElement("input");
     input.type = "text";
-    input.inputMode = "numeric";
+    input.inputMode = isPrivate ? "text" : "numeric";
     input.autocomplete = "off";
-    input.id = `access-${parser.name}-${kind}`;
+    input.id = `access-${parser.name}-${scope}-${kind}`;
     input.setAttribute(
       "aria-label",
-      `添加到${isWhite ? "白" : "黑"}名单的群号`,
+      `添加到${scopeLabel}${isWhite ? "白" : "黑"}名单的${itemLabel}`,
     );
     const fieldLabel = document.createElement("label");
     fieldLabel.htmlFor = input.id;
-    fieldLabel.textContent = "群号";
+    fieldLabel.textContent = itemLabel;
     field.append(fieldLabel, input);
     const add = createElement("button", "filled-button", "添加");
     add.type = "submit";
     form.append(field, add);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const groupId = input.value.trim();
-      if (!/^\d+$/.test(groupId)) {
+      const targetId = input.value.trim();
+      if (isPrivate) {
+        if (!targetId) {
+          showSnackbar("请输入有效的用户 ID");
+          input.focus();
+          return;
+        }
+      } else if (!/^\d+$/.test(targetId)) {
         showSnackbar("请输入有效的群号");
         input.focus();
         return;
       }
-      if (parser[listKey].includes(groupId)) {
-        showSnackbar(`${groupId} 已在名单中`);
+      if (parser[listKey].includes(targetId)) {
+        showSnackbar(`${targetId} 已在名单中`);
         return;
       }
-      parser[listKey] = [...parser[listKey], groupId];
+      parser[listKey] = [...parser[listKey], targetId];
       refreshAccessDirtyState();
       renderAccessDetail();
     });
-    row.append(form, createGroupList(parser, kind));
+    row.append(form, createAccessIdList(parser, scope, kind));
     row.append(
       createElement(
         "p",
         "field-support",
-        isWhite
-          ? "填写群号，可通过命令 psr添加解析白名单{解析器} 来添加群聊"
-          : "填写群号，可通过命令 psr添加解析黑名单{解析器} 来添加群聊",
+        isPrivate
+          ? isWhite
+            ? "填写用户 ID，可通过私聊命令 psr添加解析白名单{解析器} 来添加私聊用户"
+            : "填写用户 ID，可通过私聊命令 psr添加解析黑名单{解析器} 来添加私聊用户"
+          : isWhite
+            ? "填写群号，可通过群聊命令 psr添加解析白名单{解析器} 来添加群聊"
+            : "填写群号，可通过群聊命令 psr添加解析黑名单{解析器} 来添加群聊",
       ),
     );
     section.append(header, row);
@@ -662,8 +710,15 @@
       return;
     }
 
-    if (parser.access_mode === "white" && parser.whitelist.length === 0) {
-      showSnackbar("白名单已开启但为空，当前所有群聊都会被拦截", 4200);
+    const emptyGroupWhite = parser.whitelist_enabled && parser.whitelist.length === 0;
+    const emptyPrivateWhite =
+      parser.private_whitelist_enabled && parser.private_whitelist.length === 0;
+    if (emptyGroupWhite && emptyPrivateWhite) {
+      showSnackbar("群聊和私聊白名单均已开启且为空，当前所有会话都会被拦截", 4200);
+    } else if (emptyGroupWhite) {
+      showSnackbar("群聊白名单已开启但为空，当前所有群聊都会被拦截", 4200);
+    } else if (emptyPrivateWhite) {
+      showSnackbar("私聊白名单已开启但为空，当前所有私聊都会被拦截", 4200);
     }
 
     refs.accessDetail.innerHTML = `
@@ -691,15 +746,17 @@
       .querySelector("#access-back")
       .addEventListener("click", closeAccessDetail);
     const body = refs.accessDetail.querySelector(".detail-body");
-    const modes = createElement("section", "field-section");
-    modes.append(
-      createAccessModeRow(parser, "white"),
-      createAccessModeRow(parser, "black"),
-    );
+    const groupMode = createElement("section", "field-section");
+    groupMode.append(createAccessSwitchRow(parser, "group"));
+    const privateMode = createElement("section", "field-section");
+    privateMode.append(createAccessSwitchRow(parser, "private"));
     body.append(
-      modes,
-      createAccessSection(parser, "white"),
-      createAccessSection(parser, "black"),
+      groupMode,
+      createAccessSection(parser, "group", "white"),
+      createAccessSection(parser, "group", "black"),
+      privateMode,
+      createAccessSection(parser, "private", "white"),
+      createAccessSection(parser, "private", "black"),
     );
   }
 
@@ -1192,9 +1249,12 @@
   function discardAllDrafts() {
     for (const parser of state.parsers) {
       state.drafts.set(parser.name, createDraft(parser));
-      parser.access_mode = parser.base_access_mode;
+      parser.whitelist_enabled = Boolean(parser.base_whitelist_enabled);
       parser.whitelist = [...parser.base_whitelist];
       parser.blacklist = [...parser.base_blacklist];
+      parser.private_whitelist_enabled = Boolean(parser.base_private_whitelist_enabled);
+      parser.private_whitelist = [...parser.base_private_whitelist];
+      parser.private_blacklist = [...parser.base_private_blacklist];
     }
     renderParserList();
     renderDetail();
@@ -1218,9 +1278,12 @@
       }));
       accessPayloads = dirtyAccess.map((parser) => ({
         name: parser.name,
-        access_mode: parser.access_mode,
+        whitelist_enabled: Boolean(parser.whitelist_enabled),
         whitelist: parser.whitelist,
         blacklist: parser.blacklist,
+        private_whitelist_enabled: Boolean(parser.private_whitelist_enabled),
+        private_whitelist: parser.private_whitelist,
+        private_blacklist: parser.private_blacklist,
       }));
     } catch (error) {
       showSnackbar(error.message);
@@ -1258,9 +1321,12 @@
         }
       }
       for (const parser of dirtyAccess) {
-        parser.base_access_mode = parser.access_mode;
+        parser.base_whitelist_enabled = Boolean(parser.whitelist_enabled);
         parser.base_whitelist = [...parser.whitelist];
         parser.base_blacklist = [...parser.blacklist];
+        parser.base_private_whitelist_enabled = Boolean(parser.private_whitelist_enabled);
+        parser.base_private_whitelist = [...parser.private_whitelist];
+        parser.base_private_blacklist = [...parser.private_blacklist];
       }
       state.saving = false;
       ensureSelection();
@@ -1370,12 +1436,18 @@
       state.parsers = Array.isArray(data?.parsers) ? data.parsers : [];
       state.drafts.clear();
       for (const parser of state.parsers) {
-        parser.access_mode = parser.access_mode || "none";
+        parser.whitelist_enabled = Boolean(parser.whitelist_enabled);
         parser.whitelist = normalizeGroupIds(parser.whitelist);
         parser.blacklist = normalizeGroupIds(parser.blacklist);
-        parser.base_access_mode = parser.access_mode;
+        parser.private_whitelist_enabled = Boolean(parser.private_whitelist_enabled);
+        parser.private_whitelist = normalizeUserIds(parser.private_whitelist);
+        parser.private_blacklist = normalizeUserIds(parser.private_blacklist);
+        parser.base_whitelist_enabled = parser.whitelist_enabled;
         parser.base_whitelist = [...parser.whitelist];
         parser.base_blacklist = [...parser.blacklist];
+        parser.base_private_whitelist_enabled = parser.private_whitelist_enabled;
+        parser.base_private_whitelist = [...parser.private_whitelist];
+        parser.base_private_blacklist = [...parser.private_blacklist];
         state.drafts.set(parser.name, createDraft(parser));
       }
       ensureSelection();

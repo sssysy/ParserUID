@@ -24,12 +24,11 @@ from .config import (
     default_skin_pack,
 )
 from .parsers.config import (
-    AccessMode,
     ParserManifest,
     ParserFieldValue,
     ParserItemConfig,
+    normalize_user_ids,
     normalize_group_ids,
-    normalize_access_mode,
     load_parser_user_config,
     save_parser_user_config,
 )
@@ -77,9 +76,12 @@ class ParserItemView(TypedDict):
     name: str
     display_name: str
     enabled: bool
-    access_mode: AccessMode
+    whitelist_enabled: bool
     whitelist: list[str]
     blacklist: list[str]
+    private_whitelist_enabled: bool
+    private_whitelist: list[str]
+    private_blacklist: list[str]
     fields: list[ParserFieldView]
     values: dict[str, ParserFieldValue]
 
@@ -114,9 +116,12 @@ class SaveParsersRequest(BaseModel):
 
 class AccessListUpdatePayload(BaseModel):
     name: str
-    access_mode: AccessMode
+    whitelist_enabled: bool
     whitelist: list[str]
     blacklist: list[str]
+    private_whitelist_enabled: bool
+    private_whitelist: list[str]
+    private_blacklist: list[str]
 
 
 class SaveAccessListsRequest(BaseModel):
@@ -192,9 +197,12 @@ async def list_parsers() -> object:
                 "name": manifest.name,
                 "display_name": manifest.display_name,
                 "enabled": user_config.enabled,
-                "access_mode": user_config.access_mode,
+                "whitelist_enabled": user_config.whitelist_enabled,
                 "whitelist": user_config.whitelist,
                 "blacklist": user_config.blacklist,
+                "private_whitelist_enabled": user_config.private_whitelist_enabled,
+                "private_whitelist": user_config.private_whitelist,
+                "private_blacklist": user_config.private_blacklist,
                 "fields": fields_view,
                 "values": public_values,
             }
@@ -227,9 +235,12 @@ async def save_parsers(req: SaveParsersRequest) -> object:
             name=item.name,
             enabled=item.enabled,
             values=cleaned_values,
-            access_mode=existing.access_mode,
+            whitelist_enabled=existing.whitelist_enabled,
             whitelist=existing.whitelist,
             blacklist=existing.blacklist,
+            private_whitelist_enabled=existing.private_whitelist_enabled,
+            private_whitelist=existing.private_whitelist,
+            private_blacklist=existing.private_blacklist,
         )
         await asyncio.to_thread(save_parser_user_config, item_config)
 
@@ -239,7 +250,7 @@ async def save_parsers(req: SaveParsersRequest) -> object:
 
 @api.post("/parser-settings/access-lists")
 async def save_access_lists(req: SaveAccessListsRequest) -> object:
-    """保存每个解析器的群聊名单并刷新运行时快照。"""
+    """保存每个解析器的群聊与私聊名单并刷新运行时快照。"""
     manifests = await asyncio.to_thread(_scan_all_manifests)
 
     for item in req.parsers:
@@ -249,14 +260,18 @@ async def save_access_lists(req: SaveAccessListsRequest) -> object:
         existing = await asyncio.to_thread(load_parser_user_config, manifest)
         whitelist = normalize_group_ids(item.whitelist)
         blacklist = normalize_group_ids(item.blacklist)
-        mode = normalize_access_mode(item.access_mode)
+        private_whitelist = normalize_user_ids(item.private_whitelist)
+        private_blacklist = normalize_user_ids(item.private_blacklist)
         updated = ParserItemConfig(
             name=item.name,
             enabled=existing.enabled,
             values=existing.values,
-            access_mode=mode,
+            whitelist_enabled=item.whitelist_enabled,
             whitelist=whitelist,
             blacklist=blacklist,
+            private_whitelist_enabled=item.private_whitelist_enabled,
+            private_whitelist=private_whitelist,
+            private_blacklist=private_blacklist,
         )
         await asyncio.to_thread(save_parser_user_config, updated)
 

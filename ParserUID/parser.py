@@ -317,10 +317,15 @@ class ParserRuntime:
             return False
 
         normalized_source = normalize_url(source) if _is_http_url(source) else " ".join(source.split())
-        if not matched.parser.config.allows_group(ev.group_id):
-            logger.info(
-                f"[Parser·编排] 群聊被名单拦截 | parser={matched.keyword} | mode={matched.parser.config.access_mode}"
+        if not matched.parser.config.allows_access(group_id=ev.group_id, user_id=ev.user_id):
+            scope = "群聊" if ev.group_id else "私聊"
+            is_whitelist = (
+                matched.parser.config.whitelist_enabled
+                if ev.group_id
+                else matched.parser.config.private_whitelist_enabled
             )
+            mode = "white" if is_whitelist else "black"
+            logger.info(f"[Parser·编排] {scope}被名单拦截 | parser={matched.keyword} | mode={mode}")
             return False
 
         now = self._clock()

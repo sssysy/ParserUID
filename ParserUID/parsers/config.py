@@ -14,7 +14,6 @@ from ..utils.exceptions import ParserConfigException
 
 ParserFieldType: TypeAlias = Literal["bool", "int", "float", "string", "text", "select", "list"]
 ParserFieldValue: TypeAlias = bool | int | float | str | list[str]
-AccessMode: TypeAlias = Literal["none", "white", "black"]
 
 _GROUP_ID_RE = re.compile(r"^\d+$")
 
@@ -181,9 +180,12 @@ class ParserItemConfig:
     name: str
     enabled: bool
     values: dict[str, ParserFieldValue]
-    access_mode: AccessMode = "none"
+    whitelist_enabled: bool = False
     whitelist: list[str] = field(default_factory=list)
     blacklist: list[str] = field(default_factory=list)
+    private_whitelist_enabled: bool = False
+    private_whitelist: list[str] = field(default_factory=list)
+    private_blacklist: list[str] = field(default_factory=list)
 
     def get_bool(self, key: str, default: bool = False) -> bool:
         val = self.values.get(key)
@@ -209,13 +211,21 @@ class ParserItemConfig:
 
     def allows_group(self, group_id: str | None) -> bool:
         """按当前名单模式判断群聊是否允许接收该解析器消息。"""
-        if self.access_mode == "none":
-            return True
-        if not group_id:
-            return False
-        if self.access_mode == "white":
-            return group_id in self.whitelist
-        return group_id not in self.blacklist
+        if self.whitelist_enabled:
+            return bool(group_id) and group_id in self.whitelist
+        return not group_id or group_id not in self.blacklist
+
+    def allows_private(self, user_id: str | None) -> bool:
+        """按当前名单模式判断私聊用户是否允许接收该解析器消息。"""
+        if self.private_whitelist_enabled:
+            return bool(user_id) and user_id in self.private_whitelist
+        return not user_id or user_id not in self.private_blacklist
+
+    def allows_access(self, *, group_id: str | None, user_id: str | None) -> bool:
+        """根据是否存在群号分别按群聊或私聊名单判断是否放行。"""
+        if group_id:
+            return self.allows_group(group_id)
+        return self.allows_private(user_id)
 
     def __getattr__(self, name: str) -> ParserFieldValue:
         if name in self.values:
@@ -242,11 +252,18 @@ def normalize_group_ids(raw: object) -> list[str]:
     return result
 
 
-def normalize_access_mode(raw: object) -> AccessMode:
-    """收窄持久化的名单模式；未知值回落到不过滤。"""
-    if raw == "white" or raw == "black":
-        return raw
-    return "none"
+def normalize_user_ids(raw: object) -> list[str]:
+    """校验并去重私聊用户 ID 列表，允许任意非空字符串。"""
+    if not isinstance(raw, list):
+        return []
+    result: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        user_id = item.strip()
+        if user_id and user_id not in result:
+            result.append(user_id)
+    return result
 
 
 def load_parser_user_config(manifest: ParserManifest) -> ParserItemConfig:
@@ -290,17 +307,27 @@ def load_parser_user_config(manifest: ParserManifest) -> ParserItemConfig:
         else:
             merged_values[field_name] = field_def.default
 
-    access_mode = normalize_access_mode(raw.get("access_mode", "none"))
+    raw_whitelist_enabled = raw.get("whitelist_enabled", False)
+    whitelist_enabled = raw_whitelist_enabled if isinstance(raw_whitelist_enabled, bool) else False
     whitelist = normalize_group_ids(raw.get("whitelist", []))
     blacklist = normalize_group_ids(raw.get("blacklist", []))
+    raw_private_whitelist_enabled = raw.get("private_whitelist_enabled", False)
+    private_whitelist_enabled = (
+        raw_private_whitelist_enabled if isinstance(raw_private_whitelist_enabled, bool) else False
+    )
+    private_whitelist = normalize_user_ids(raw.get("private_whitelist", []))
+    private_blacklist = normalize_user_ids(raw.get("private_blacklist", []))
 
     return ParserItemConfig(
         name=manifest.name,
         enabled=enabled,
         values=merged_values,
-        access_mode=access_mode,
+        whitelist_enabled=whitelist_enabled,
         whitelist=whitelist,
         blacklist=blacklist,
+        private_whitelist_enabled=private_whitelist_enabled,
+        private_whitelist=private_whitelist,
+        private_blacklist=private_blacklist,
     )
 
 
@@ -312,9 +339,12 @@ def save_parser_user_config(config: ParserItemConfig) -> None:
         "schema_version": 1,
         "enabled": config.enabled,
         "values": config.values,
-        "access_mode": config.access_mode,
+        "whitelist_enabled": config.whitelist_enabled,
         "whitelist": normalize_group_ids(config.whitelist),
         "blacklist": normalize_group_ids(config.blacklist),
+        "private_whitelist_enabled": config.private_whitelist_enabled,
+        "private_whitelist": normalize_user_ids(config.private_whitelist),
+        "private_blacklist": normalize_user_ids(config.private_blacklist),
     }
     content = json.dumps(payload, ensure_ascii=False, indent=2)
     config_path.write_text(content, encoding="utf-8")
