@@ -7,7 +7,7 @@ import html
 import time
 import asyncio
 import hashlib
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from dataclasses import field, dataclass
 from urllib.parse import urlsplit, urlunsplit
 from collections.abc import Callable, Sequence, Awaitable
@@ -34,6 +34,9 @@ from .utils.exceptions import (
     sanitize_error_text,
     format_timeout_error,
 )
+
+if TYPE_CHECKING:
+    from gsuid_core.ai_core.hooks import AgentHookResult, AgentHookContext
 
 
 class Description(Protocol):
@@ -93,10 +96,13 @@ SendResult = Callable[[Bot, Event, Sequence[ContentItem]], Awaitable[bool]]
 
 URL_RE = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
 _CARD_SEGMENT_TYPES = frozenset({"json", "xml", "share", "card", "ark", "light_app"})
+_NON_CARD_MEDIA_TYPES = frozenset({"record", "video", "file", "node"})
 _MESSAGE_DEDUP_SECONDS = 600.0
+_AI_BLOCK_TTL_SECONDS = 60.0
 _TRAILING_PUNCTUATION = ".,;:!?，。；：！？、"
 _CLOSING_PAIRS = {")": "(", "]": "[", "}": "{"}
 _TRAILING_CLOSERS = "〉》」』】"
+_PURE_WRAP_CHARS = " \t\r\n.,;:!?，。；：！？、()[]{}<>《》「」『』【】\"'`~～"
 _MAX_CARD_DEPTH = 8
 
 
@@ -114,6 +120,15 @@ class _ExpiringClaims:
         if key in self.claims:
             return False
         self.claims[key] = now
+        return True
+
+    def contains(self, key: str, now: float) -> bool:
+        if self.ttl <= 0 or key not in self.claims:
+            return False
+        claimed_at = self.claims[key]
+        if now - claimed_at > self.ttl:
+            del self.claims[key]
+            return False
         return True
 
     def _purge(self, now: float) -> None:
@@ -265,6 +280,60 @@ def build_dedup_key(ev: Event, normalized_url: str) -> str:
     return f"{ev.session_id}\x1f{message_id}\x1f{normalized_url}"
 
 
+def _build_event_key(ev: Event) -> str:
+    """生成单条消息级去重键，用于关联解析任务与 AI 拦截钩子。"""
+    message_id = ev.msg_id
+    if not message_id:
+        material = "\x1f".join((ev.raw_text, ev.reply or "", str(len(ev.content))))
+        message_id = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return f"{ev.session_id}\x1f{message_id}"
+
+
+def _extract_raw_text(ev: Event) -> str:
+    if ev.raw_text.strip():
+        return ev.raw_text
+    parts = [
+        segment.data.strip()
+        for segment in ev.content
+        if segment.type == "text" and isinstance(segment.data, str) and segment.data.strip()
+    ]
+    return " ".join(parts)
+
+
+def _has_own_media(ev: Event) -> bool:
+    reply_image_ids = set(ev.reply_image_id_list)
+    has_own_image = (
+        any(img_id not in reply_image_ids for img_id in ev.image_id_list)
+        or bool(ev.image_id and ev.image_id not in reply_image_ids)
+        or bool(ev.image and not ev.image_id_list and not ev.reply_image_id_list)
+    )
+    if has_own_image:
+        return True
+    if ev.audio_id or ev.audio_id_list or ev.video_id or ev.video_id_list or ev.file or ev.node:
+        return True
+    for segment in ev.content:
+        if segment.type in _NON_CARD_MEDIA_TYPES and segment.data:
+            return True
+        if segment.type == "image" and segment.data and not ev.reply_image_id_list and not ev.image_id_list:
+            return True
+    return False
+
+
+def is_pure_parser_message(ev: Event, source: str, matched: ParserMatch) -> bool:
+    """判断消息是否仅包含可解析链接、触发词或分享卡片，不含额外聊天内容。"""
+    if ev.at_list or _has_own_media(ev):
+        return False
+    raw_text = _extract_raw_text(ev)
+    normalized_raw = html.unescape(raw_text).replace("\\/", "/").strip()
+    if not normalized_raw:
+        return True
+    token = source if _is_http_url(source) else matched.searched.group(0)
+    if not token or token not in normalized_raw:
+        return False
+    remainder = normalized_raw.replace(token, "", 1)
+    return not remainder.strip(_PURE_WRAP_CHARS)
+
+
 async def _default_send_description(bot: Bot, ev: Event, description: Description) -> None:
     from .sender import send_description
 
@@ -297,6 +366,7 @@ class ParserRuntime:
         self._send_result = send_result or _default_send_result
         self._clock = clock
         self._message_claims = _ExpiringClaims(_MESSAGE_DEDUP_SECONDS)
+        self._ai_block_claims = _ExpiringClaims(_AI_BLOCK_TTL_SECONDS)
         self._link_claims: _ExpiringClaims | None = None
         self._debounce_seconds: float | None = None
         self._timeout: float | None = None
@@ -329,6 +399,8 @@ class ParserRuntime:
             return False
 
         now = self._clock()
+        if is_pure_parser_message(ev, source, matched):
+            self._ai_block_claims.claim(_build_event_key(ev), now)
         if not self._message_claims.claim(build_dedup_key(ev, normalized_source), now):
             return False
         link_claims = _require_claims(self._link_claims)
@@ -358,6 +430,24 @@ class ParserRuntime:
         task.add_done_callback(self._on_task_done)
         bot.bot._add_bg_task(task)
         return True
+
+    def should_block_ai(self, ev: Event) -> bool:
+        """判断该事件是否应拦截 Core AI 回复（仅纯解析消息返回 True）。"""
+        if self._closed:
+            return False
+        now = self._clock()
+        if self._ai_block_claims.contains(_build_event_key(ev), now):
+            return True
+        include_reply = bool(parser_config.get_config("parse_replies").data)
+        source = extract_match_source(ev, include_reply=include_reply)
+        if source is None:
+            return False
+        matched = self.registry.match(source)
+        if matched is None:
+            return False
+        if not matched.parser.config.allows_access(group_id=ev.group_id, user_id=ev.user_id):
+            return False
+        return is_pure_parser_message(ev, source, matched)
 
     async def _send_trigger_feedback(self, bot: Bot, platform_display_name: str) -> None:
         try:
@@ -497,10 +587,122 @@ async def close_runtime() -> None:
 
 sv = SV("ParserUID 自动解析", pm=6, area="ALL")
 
+_AI_HOOK_PRIORITY = 400
+_ai_hook_registered = False
+
+
+def _is_sv_authorized(ev: Event) -> bool:
+    """校验插件与自动解析 SV 是否对当前事件开放，避免关闭插件后误拦 AI。"""
+    plugin = sv.plugins
+    if not plugin.enabled or not sv.enabled:
+        return False
+    user_pm = int(ev.user_pm)
+    if user_pm > plugin.pm or user_pm > sv.pm:
+        return False
+    if ev.group_id in plugin.black_list or ev.user_id in plugin.black_list:
+        return False
+    if ev.group_id in sv.black_list or ev.user_id in sv.black_list:
+        return False
+    plugin_area = plugin.area
+    if not (
+        plugin_area in {"SV", "ALL"}
+        or (ev.user_type == "group" and plugin_area == "GROUP")
+        or (ev.user_type == "direct" and plugin_area == "DIRECT")
+    ):
+        return False
+    if not (
+        sv.area == "ALL"
+        or plugin_area == "ALL"
+        or (ev.user_type == "group" and sv.area == "GROUP")
+        or (ev.user_type == "direct" and sv.area == "DIRECT")
+    ):
+        return False
+    if plugin.white_list and plugin.white_list != [""]:
+        if ev.user_id not in plugin.white_list and ev.group_id not in plugin.white_list:
+            return False
+    bot_black = [bot_id for bot_id in plugin.bot_black_list if bot_id]
+    if bot_black and ev.bot_self_id in bot_black:
+        return False
+    bot_white = [bot_id for bot_id in plugin.bot_white_list if bot_id]
+    if bot_white and ev.bot_self_id not in bot_white:
+        return False
+    if sv.white_list and sv.white_list != [""]:
+        if ev.user_id not in sv.white_list and ev.group_id not in sv.white_list:
+            return False
+    return True
+
+
+def _collect_turn_events(primary_ev: Event) -> tuple[Event, ...]:
+    """读取当前 AI 收件箱批次中的全部事件；含命令回执或连发普通消息时不拦。"""
+    try:
+        from gsuid_core.ai_core.inbox.turn import current_turn
+    except ImportError:
+        return (primary_ev,)
+    turn = current_turn()
+    if turn is None or not turn.entries:
+        return (primary_ev,)
+    if any(entry.receipt is not None for entry in turn.entries):
+        return ()
+    return tuple(entry.event for entry in turn.entries)
+
+
+async def _block_ai_if_parsed(ctx: AgentHookContext) -> AgentHookResult | None:
+    if ctx.ev is None:
+        return None
+    events = _collect_turn_events(ctx.ev)
+    if not events:
+        return None
+    runtime = await get_runtime()
+    for event in events:
+        if not _is_sv_authorized(event) or not runtime.should_block_ai(event):
+            return None
+    logger.info(f"[Parser·AI拦截] 纯解析消息跳过 AI 回复 | session={ctx.session_id} | count={len(events)}")
+    return ctx.abort("handled_by_parser")
+
+
+def _is_core_ai_enabled() -> bool:
+    try:
+        from gsuid_core.ai_core.configs.ai_config import ai_config
+    except ImportError:
+        return False
+    return bool(ai_config.get_config("enable").data)
+
+
+def ensure_ai_hook_registered() -> bool:
+    """在 Core 启用 AI 时按需注册 H01 拦截钩子，避免关闭 AI 时加载 ai_core。"""
+    global _ai_hook_registered
+    if _ai_hook_registered:
+        return True
+    if not _is_core_ai_enabled():
+        return False
+    try:
+        from gsuid_core.ai_core.hooks import AgentHookPoint, on_agent_hook
+    except ImportError:
+        return False
+    on_agent_hook(AgentHookPoint.BEFORE_AI_CHAT, priority=_AI_HOOK_PRIORITY)(_block_ai_if_parsed)
+    _ai_hook_registered = True
+    logger.info("[Parser·AI拦截] 已注册 BEFORE_AI_CHAT 拦截钩子")
+    return True
+
+
+def unregister_ai_hook() -> None:
+    """插件关闭或重载时摘除本模块注册的 AI 拦截钩子。"""
+    global _ai_hook_registered
+    if not _ai_hook_registered:
+        return
+    try:
+        from gsuid_core.ai_core.hooks import drop_hooks_for_module
+    except ImportError:
+        _ai_hook_registered = False
+        return
+    drop_hooks_for_module(__name__)
+    _ai_hook_registered = False
+
 
 @sv.on_message(block=False, prefix=False)
 async def on_parser_message(bot: Bot, ev: Event) -> None:
     """自动解析消息中的首个受支持链接。"""
+    ensure_ai_hook_registered()
     runtime = await get_runtime()
     await runtime.dispatch(bot, ev)
 
@@ -509,6 +711,7 @@ async def on_parser_message(bot: Bot, ev: Event) -> None:
 async def _initialize_parser_runtime() -> None:
     await asyncio.to_thread(_ensure_addons_dirs)
     await get_runtime()
+    ensure_ai_hook_registered()
 
 
 def _ensure_addons_dirs() -> None:
@@ -519,6 +722,7 @@ def _ensure_addons_dirs() -> None:
 
 @on_core_shutdown
 async def _close_parser_runtime() -> None:
+    unregister_ai_hook()
     await close_runtime()
     from .render.runtime import close_render_assets
 

@@ -6,6 +6,8 @@ import re
 import json
 import asyncio
 from typing import ClassVar
+from urllib.parse import urlsplit
+from collections.abc import Sequence
 
 import httpx
 import msgspec
@@ -22,15 +24,17 @@ from .models import (
     decode_comments,
 )
 from ...config import card_image_limit
+from ...sender import ContentItem
 from ...utils.utils import format_num
 from ...utils.models import Platform, MediaContent
 from ...render.models import Metric, Comment, ImageBlock
 from ...utils.helpers import build_image_blocks
-from ...utils.exceptions import ParseException
+from ...utils.exceptions import ParseException, sanitize_error_text
 
 
 class DouYinParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name="douyin", display_name="抖音")
+    SHORT_LINK_KEYWORDS: ClassVar[frozenset[str]] = frozenset({"v.douyin", "jx.douyin"})
     TTWID_REGISTER_URL: ClassVar[str] = "https://ttwid.bytedance.com/ttwid/union/register/"
     DETAIL_URL: ClassVar[str] = "https://www.douyin.com/aweme/v1/web/aweme/detail/"
     COMMENT_URL: ClassVar[str] = "https://www.douyin.com/aweme/v1/web/comment/list/"
@@ -165,9 +169,40 @@ class DouYinParser(BaseParser):
 
     @handle("v.douyin", r"v\.douyin\.com/[a-zA-Z0-9_\-]+")
     @handle("jx.douyin", r"jx\.douyin\.com/[a-zA-Z0-9_\-]+")
-    async def _parse_short_link(self, searched: re.Match[str]) -> list[MediaContent]:
+    async def _parse_short_link(self, searched: re.Match[str]) -> Sequence[ContentItem]:
         url = f"https://{searched.group(0)}"
-        return await self.parse_with_redirect(url)
+        final_url = await self.get_final_url(url)
+        for keyword, (pattern, handler) in self._handlers.items():
+            if keyword in self.SHORT_LINK_KEYWORDS:
+                continue
+            if keyword in final_url:
+                matched = pattern.search(final_url)
+                if matched is not None:
+                    return await handler(matched)
+        if self._is_user_profile_url(final_url):
+            safe_url = sanitize_error_text(final_url)
+            logger.info(f"[Parser·抖音] 忽略用户个人主页链接 | url={safe_url}")
+            return []
+        raise ParseException(f"重定向后的 URL 未能匹配任何已知规则：{final_url}")
+
+    @staticmethod
+    def _is_user_profile_url(url: str) -> bool:
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return False
+        host = (parsed.hostname or "").lower()
+        is_douyin_host = (
+            host in {"douyin.com", "iesdouyin.com"} or host.endswith(".douyin.com") or host.endswith(".iesdouyin.com")
+        )
+        if not is_douyin_host:
+            return False
+        segments = [segment.lower() for segment in parsed.path.split("/") if segment]
+        if not segments:
+            return False
+        if segments[0] == "user":
+            return True
+        return len(segments) >= 2 and segments[0] in {"share", "m"} and segments[1] == "user"
 
     @handle("webcast.amemv.com", r"douyin/webcast/reflow/(?P<room_id>\d+)")
     async def _parse_live_by_room_id(self, searched: re.Match[str]) -> list[MediaContent]:
