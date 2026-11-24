@@ -22,7 +22,7 @@ from gsuid_core.data_store import get_res_path
 from .utils import format_size_bytes
 from .ffmpeg import FFmpegUnavailable, exec_ffmpeg_cmd
 from ..config import max_file_size_bytes
-from .exceptions import DownloadException
+from .exceptions import DownloadException, FileSizeLimitException
 
 DEFAULT_IMAGE_MAX_BYTES: Final = 20 * 1024 * 1024
 DEFAULT_CACHE_MAX_AGE_SECONDS: Final = 7 * 24 * 60 * 60
@@ -103,8 +103,12 @@ class Downloader:
         actual_name = filename if filename is not None else self._url_to_filename(url)
         target = self.cache_dir / actual_name
 
-        if await asyncio.to_thread(target.is_file) and (await asyncio.to_thread(lambda: target.stat().st_size)) > 0:
-            return target
+        if await asyncio.to_thread(target.is_file):
+            cached_size = await asyncio.to_thread(lambda: target.stat().st_size)
+            if cached_size > limit:
+                raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(limit)}）")
+            if cached_size > 0:
+                return target
 
         candidates = [url, *(fallback_urls or ())]
         last_error: Exception | None = None
@@ -112,6 +116,12 @@ class Downloader:
         for attempt, candidate_url in enumerate(candidates, start=1):
             try:
                 return await self._stream_download(candidate_url, target, headers, proxy, limit)
+            except FileSizeLimitException:
+                logger.warning(
+                    f"[Parser·下载] 文件超过大小限制 | host={urlparse(candidate_url).hostname or 'unknown'} "
+                    f"| limit={format_size_bytes(limit)}"
+                )
+                raise
             except Exception as exc:
                 last_error = exc
                 status = f" | status={exc.message}" if isinstance(exc, DownloadException) else ""
@@ -120,7 +130,12 @@ class Downloader:
                     f"| attempt={attempt}/{len(candidates)} | error_type={type(exc).__name__}{status}"
                 )
 
-        raise DownloadException(f"文件下载失败（尝试了 {len(candidates)} 个地址）：{last_error}")
+        if isinstance(last_error, DownloadException):
+            raise last_error
+        if isinstance(last_error, (TimeoutError, httpx.TimeoutException)):
+            raise DownloadException("下载超时") from last_error
+        detail = str(last_error or "").strip()
+        raise DownloadException(f"文件下载失败：{detail}" if detail else "文件下载失败") from last_error
 
     async def _stream_download(
         self,
@@ -139,12 +154,16 @@ class Downloader:
                 if response.status_code >= 400:
                     raise DownloadException(f"HTTP 错误 {response.status_code}")
 
+                content_length = _parse_content_length(response.headers.get("content-length"))
+                if content_length is not None and content_length > max_bytes:
+                    raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
+
                 total_downloaded = 0
                 with temporary.open("wb") as handle:
                     async for chunk in response.aiter_bytes(chunk_size=_CHUNK_SIZE):
                         total_downloaded += len(chunk)
                         if total_downloaded > max_bytes:
-                            raise DownloadException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
+                            raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
                         handle.write(chunk)
 
             if total_downloaded == 0:
@@ -177,16 +196,17 @@ class Downloader:
         self,
         url: str,
         *,
+        filename: str | None = None,
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
         fallback_urls: Sequence[str] | None = None,
         max_bytes: int | None = None,
     ) -> Path:
         """下载视频流文件。"""
-        filename = self._url_to_filename(url, default_suffix=".mp4")
+        actual_name = filename if filename is not None else self._url_to_filename(url, default_suffix=".mp4")
         return await self.download_file(
             url,
-            filename=filename,
+            filename=actual_name,
             headers=headers,
             proxy=proxy,
             fallback_urls=fallback_urls,
@@ -234,6 +254,8 @@ class Downloader:
             await asyncio.to_thread(lambda: target.stat().st_size) if await asyncio.to_thread(target.is_file) else 0
         )
         if cached_size > 0:
+            if cached_size > limit:
+                raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(limit)}）")
             return target
 
         temporary = self.cache_dir / f".{target.stem}.{uuid.uuid4().hex}.tmp.mp4"
@@ -252,6 +274,8 @@ class Downloader:
                     )
                     await asyncio.to_thread(os.replace, temporary, target)
                     return target
+                except FileSizeLimitException:
+                    raise
                 except (DownloadException, TimeoutError, OSError, RuntimeError) as exc:
                     last_error = exc
                     logger.warning(
@@ -261,7 +285,12 @@ class Downloader:
                     )
         finally:
             await asyncio.to_thread(temporary.unlink, missing_ok=True)
-        raise DownloadException(f"文件下载失败（尝试了 {len(candidates)} 个地址）：{last_error}") from last_error
+        if isinstance(last_error, DownloadException):
+            raise last_error
+        if isinstance(last_error, (TimeoutError, httpx.TimeoutException)):
+            raise DownloadException("下载超时") from last_error
+        detail = str(last_error or "").strip()
+        raise DownloadException(f"文件下载失败：{detail}" if detail else "文件下载失败") from last_error
 
     async def _download_hls_candidate(
         self,
@@ -309,7 +338,7 @@ class Downloader:
         if size <= 0:
             raise DownloadException("HLS 下载得到 0 字节文件")
         if size > max_bytes:
-            raise DownloadException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
+            raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
 
     async def download_with_ytdlp(
         self,
@@ -365,10 +394,10 @@ class Downloader:
                         if mkv_alt.is_file():
                             result_path = mkv_alt
                 if not result_path.is_file():
-                    raise DownloadException(f"文件大小超出限制（上限 {format_size_bytes(limit)}）")
+                    raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(limit)}）")
                 if result_path.stat().st_size > limit:
                     result_path.unlink(missing_ok=True)
-                    raise DownloadException(f"文件大小超出限制（上限 {format_size_bytes(limit)}）")
+                    raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(limit)}）")
                 return result_path
 
         return await asyncio.to_thread(_sync_ytdlp_run)
@@ -448,6 +477,16 @@ def _ytdlp_download_range(value: str) -> object:
         return yt_dlp.utils.download_range_func(None, value)
     except (AttributeError, TypeError, ValueError) as exc:
         raise DownloadException("yt-dlp 下载裁切范围无效") from exc
+
+
+def _parse_content_length(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        length = int(value.strip())
+    except ValueError:
+        return None
+    return length if length > 0 else None
 
 
 _GLOBAL_DOWNLOADER = Downloader()

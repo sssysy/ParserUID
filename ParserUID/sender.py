@@ -27,7 +27,7 @@ from .utils.utils import format_size_bytes, format_duration_seconds
 from .utils.ffmpeg import probe_duration
 from .utils.onebot import send_music_card, onebot_call_api_available
 from .render.models import PreviewCard
-from .utils.exceptions import ResourceLimitException, sanitize_error_text
+from .utils.exceptions import DEFAULT_USER_ERROR, ResourceLimitException, sanitize_error_text
 from .utils.music_card import MusicCardInfo, sign_music_card
 
 _CURRENT_SEND_PROXY: ContextVar[str | None] = ContextVar("parser_uid_send_proxy", default=None)
@@ -354,10 +354,16 @@ async def _build_media_segment(
             return _BuiltMediaSegment(segment=await asyncio.to_thread(MessageSegment.image, path))
         file_name = item.name if isinstance(item, NamedMediaProtocol) and item.name else None
         return _BuiltMediaSegment(segment=await asyncio.to_thread(_media_segment, path, kind, file_name))
+    except ResourceLimitException as exc:
+        error_text = sanitize_error_text(str(exc), hide_local_paths=True) or DEFAULT_USER_ERROR
+        logger.warning(f"[Parser·发送] {MEDIA_LABELS[kind]}超出限制，已跳过 | error_type={type(exc).__name__}")
+        return _BuiltMediaSegment(failure=f"跳过解析：{error_text}")
     except Exception as exc:
-        error_text = sanitize_error_text(str(exc))
+        error_text = sanitize_error_text(str(exc), hide_local_paths=True)
+        if not error_text:
+            error_text = "下载超时" if isinstance(exc, TimeoutError) else DEFAULT_USER_ERROR
         logger.warning(f"[Parser·发送] {MEDIA_LABELS[kind]}内容不可用 | error_type={type(exc).__name__}")
-        return _BuiltMediaSegment(failure=f"{MEDIA_LABELS[kind]}获取失败，已跳过：{error_text}")
+        return _BuiltMediaSegment(failure=f"解析失败：{error_text}")
 
 
 async def _validate_media_limits(path: Path, duration: float, kind: MediaKind) -> None:

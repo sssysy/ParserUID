@@ -49,12 +49,14 @@ from .models import (
     decode_favorite,
 )
 from .comment import comment_limit, decode_comments as decode_card_comments
+from ...config import max_file_size_bytes
 from ...sender import ContentItem
+from ...utils.utils import format_size_bytes
 from ...utils.ffmpeg import merge_av
 from ...utils.models import Platform, MediaContent
 from ...render.models import Author, Metric, Comment, PreviewCard
 from ...utils.helpers import build_card_blocks, build_image_blocks
-from ...utils.exceptions import ParseException
+from ...utils.exceptions import ParseException, FileSizeLimitException
 
 if TYPE_CHECKING:
     from ..config import ParserItemConfig
@@ -76,7 +78,7 @@ BROWSER_USER_AGENT = (
 
 
 class StreamSelection(TypedDict):
-    video: list[str]
+    videos: list[StreamCandidate]
     audio: list[list[str]]
     quality: str
     resolution: str
@@ -152,6 +154,10 @@ class BilibiliParser(BaseParser):
     def quality(self) -> int:
         value = self.get_config_value("video_quality", "auto").strip().lower()
         return QUALITY_MAP.get(value, 127)
+
+    @property
+    def downgrade_quality_on_oversize(self) -> bool:
+        return self.config.get_bool("downgrade_quality_on_oversize", False)
 
     def _set_cookies(self) -> None:
         cookies_str = self.get_config_value("cookies")
@@ -368,7 +374,7 @@ class BilibiliParser(BaseParser):
             cid=cid,
             duration=pages_duration,
         )
-        stream_urls = stream["video"]
+        video_candidates = stream["videos"]
         audio_urls = stream["audio"]
         quality_label = stream["quality"]
         resolution = stream["resolution"]
@@ -397,10 +403,10 @@ class BilibiliParser(BaseParser):
             video_duration=f"{pages_duration}s" if pages_duration > 0 else None,
             video_quality=quality_label if not resolution else f"{quality_label} · {resolution}",
         )
-        if not stream_urls:
+        if not video_candidates:
             raise ParseException("未找到可用的视频流")
         content = self._build_video_content(
-            stream_urls,
+            video_candidates,
             audio_urls,
             cover,
             pages_duration,
@@ -525,9 +531,10 @@ class BilibiliParser(BaseParser):
             videos = self._normalize_streams(raw_videos, kind="video")
             audios = self._normalize_streams(raw_audios, kind="audio")
             if videos:
-                selected = self._select_video_stream(videos)
+                candidates = self._select_video_streams(videos)
+                selected = candidates[0]
                 return StreamSelection(
-                    video=_string_list(selected["urls"]),
+                    videos=candidates,
                     audio=[_string_list(item["urls"]) for item in audios],
                     quality=str(selected["quality"]),
                     resolution=str(selected["resolution"]),
@@ -538,7 +545,15 @@ class BilibiliParser(BaseParser):
             urls = self._normalize_durl(durl)
             if urls:
                 return StreamSelection(
-                    video=urls,
+                    videos=[
+                        StreamCandidate(
+                            urls=urls,
+                            quality_id=0,
+                            quality="MP4",
+                            resolution="",
+                            codec="",
+                        )
+                    ],
                     audio=[],
                     quality="MP4",
                     resolution="",
@@ -639,6 +654,22 @@ class BilibiliParser(BaseParser):
         within_preference = [candidate for candidate in videos if candidate["quality_id"] <= target]
         return within_preference[0] if within_preference else videos[-1]
 
+    def _select_video_streams(self, videos: list[StreamCandidate]) -> list[StreamCandidate]:
+        """返回按画质从高到低排列的候选列表；未开启超限降级时仅返回首选画质。"""
+        selected = self._select_video_stream(videos)
+        if not self.downgrade_quality_on_oversize:
+            return [selected]
+
+        candidates: list[StreamCandidate] = [selected]
+        seen_qualities: set[int] = {selected["quality_id"]}
+        for candidate in videos:
+            quality_id = candidate["quality_id"]
+            if quality_id >= selected["quality_id"] or quality_id in seen_qualities:
+                continue
+            seen_qualities.add(quality_id)
+            candidates.append(candidate)
+        return candidates
+
     @staticmethod
     def _stream_int(value: object) -> int:
         try:
@@ -688,58 +719,35 @@ class BilibiliParser(BaseParser):
 
     def _build_video_content(
         self,
-        videos: list[str],
+        candidates: list[StreamCandidate],
         audios: list[list[str]],
         cover: str | None,
         duration: int,
     ) -> MediaContent:
-        digest = sha256(videos[0].split("?", 1)[0].encode()).hexdigest()[:16]
-        output_name = f"bilibili_{digest}.mp4"
+        del cover
 
         async def load() -> Path:
-            output_path = self.downloader.cache_dir / output_name
-            if output_path.exists():
-                return output_path
+            limit = max_file_size_bytes()
+            audio_path: Path | None = None
+            audio_index = -1
             if audios:
-                last_error: ParseException | OSError | None = None
-                for audio_urls in audios:
-                    for video_url in videos:
-                        for audio_url in audio_urls:
-                            try:
-                                v_tmp = await self.downloader.download_video(
-                                    video_url,
-                                    headers=self.media_headers,
-                                    proxy=self.proxy,
-                                )
-                                a_tmp = await self.downloader.download_audio(
-                                    audio_url,
-                                    headers=self.media_headers,
-                                    proxy=self.proxy,
-                                )
-                                return await merge_av(
-                                    video_path=v_tmp,
-                                    audio_path=a_tmp,
-                                    output_path=output_path,
-                                )
-                            except (ParseException, OSError) as exc:
-                                last_error = exc
-                if isinstance(last_error, ParseException):
-                    raise last_error
-                raise ParseException(str(last_error or "视频音轨下载或合并失败")) from last_error
-            last_error: ParseException | OSError | None = None
-            for video_url in videos:
-                try:
-                    return await self.downloader.download_video(
-                        video_url,
-                        filename=output_name,
-                        headers=self.media_headers,
-                        proxy=self.proxy,
-                    )
-                except (ParseException, OSError) as exc:
-                    last_error = exc
-            if isinstance(last_error, ParseException):
-                raise last_error
-            raise ParseException(str(last_error or "视频流下载失败")) from last_error
+                audio_path, audio_index = await self._download_audio_track(audios, limit)
+            try:
+                return await self._try_video_candidates(
+                    candidates,
+                    audio_path=audio_path,
+                    max_bytes=limit,
+                )
+            except FileSizeLimitException:
+                if not self.downgrade_quality_on_oversize or audio_index < 0 or audio_index + 1 >= len(audios):
+                    raise
+                # 首选音轨已挤占过多体积时，改用最低码率音轨最后尝试一次。
+                fallback_audio, _ = await self._download_audio_track(audios[-1:], limit)
+                return await self._try_video_candidates(
+                    candidates,
+                    audio_path=fallback_audio,
+                    max_bytes=limit,
+                )
 
         return self.create_video_content(
             None,
@@ -747,6 +755,135 @@ class BilibiliParser(BaseParser):
             duration=duration,
             proxy=self.proxy,
         )
+
+    async def _download_audio_track(
+        self,
+        audios: list[list[str]],
+        max_bytes: int,
+    ) -> tuple[Path, int]:
+        last_error: ParseException | OSError | None = None
+        for index, audio_urls in enumerate(audios):
+            for audio_url in audio_urls:
+                try:
+                    path = await self.downloader.download_audio(
+                        audio_url,
+                        headers=self.media_headers,
+                        proxy=self.proxy,
+                        max_bytes=max_bytes,
+                    )
+                    return path, index
+                except FileSizeLimitException as exc:
+                    last_error = exc
+                    break
+                except (ParseException, OSError) as exc:
+                    last_error = exc
+        if isinstance(last_error, ParseException):
+            raise last_error
+        raise ParseException(str(last_error or "音频流下载失败")) from last_error
+
+    async def _try_video_candidates(
+        self,
+        candidates: list[StreamCandidate],
+        *,
+        audio_path: Path | None,
+        max_bytes: int,
+    ) -> Path:
+        last_limit_error: FileSizeLimitException | None = None
+        for index, candidate in enumerate(candidates):
+            try:
+                return await self._download_video_candidate(
+                    candidate,
+                    audio_path=audio_path,
+                    max_bytes=max_bytes,
+                )
+            except FileSizeLimitException as exc:
+                last_limit_error = exc
+                if index + 1 < len(candidates):
+                    next_candidate = candidates[index + 1]
+                    logger.info(
+                        f"[Parser·哔哩哔哩] 视频超过大小上限，尝试降低画质 | "
+                        f"from={candidate['quality']} | to={next_candidate['quality']} "
+                        f"| limit={format_size_bytes(max_bytes)}"
+                    )
+                    continue
+                raise
+        if last_limit_error is not None:
+            raise last_limit_error
+        raise ParseException("视频流下载失败")
+
+    async def _download_video_candidate(
+        self,
+        candidate: StreamCandidate,
+        *,
+        audio_path: Path | None,
+        max_bytes: int,
+    ) -> Path:
+        urls = candidate["urls"]
+        if not urls:
+            raise ParseException("未找到可用的视频流")
+        cache_key = urls[0].split("?", 1)[0]
+        if audio_path is not None:
+            cache_key = f"{cache_key}|{audio_path.name}"
+        digest = sha256(cache_key.encode()).hexdigest()[:16]
+        output_name = f"bilibili_{digest}.mp4"
+        output_path = self.downloader.cache_dir / output_name
+        if await asyncio.to_thread(output_path.is_file):
+            cached_size = await asyncio.to_thread(lambda: output_path.stat().st_size)
+            if cached_size > max_bytes:
+                raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
+            if cached_size > 0:
+                return output_path
+
+        if audio_path is not None:
+            audio_size = await asyncio.to_thread(lambda: audio_path.stat().st_size)
+            video_limit = max_bytes - audio_size
+            if video_limit <= 0:
+                raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
+            last_error: ParseException | OSError | None = None
+            for video_url in urls:
+                try:
+                    v_tmp = await self.downloader.download_video(
+                        video_url,
+                        headers=self.media_headers,
+                        proxy=self.proxy,
+                        max_bytes=video_limit,
+                    )
+                    merged = await merge_av(
+                        video_path=v_tmp,
+                        audio_path=audio_path,
+                        output_path=output_path,
+                    )
+                    merged_size = await asyncio.to_thread(lambda: merged.stat().st_size)
+                    if merged_size > max_bytes:
+                        await asyncio.to_thread(merged.unlink, missing_ok=True)
+                        raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）")
+                    return merged
+                except FileSizeLimitException:
+                    # 还原为全局上限提示，避免向用户暴露扣除音轨后的剩余预算。
+                    raise FileSizeLimitException(f"文件大小超出限制（上限 {format_size_bytes(max_bytes)}）") from None
+                except (ParseException, OSError) as exc:
+                    last_error = exc
+            if isinstance(last_error, ParseException):
+                raise last_error
+            raise ParseException(str(last_error or "视频音轨下载或合并失败")) from last_error
+
+        last_error: ParseException | OSError | None = None
+        for video_url in urls:
+            try:
+                return await self.downloader.download_video(
+                    video_url,
+                    filename=output_name,
+                    headers=self.media_headers,
+                    proxy=self.proxy,
+                    max_bytes=max_bytes,
+                )
+            except FileSizeLimitException:
+                raise
+            except (ParseException, OSError) as exc:
+                last_error = exc
+        if isinstance(last_error, ParseException):
+            raise last_error
+        raise ParseException(str(last_error or "视频流下载失败")) from last_error
 
     async def close_session(self) -> None:
         self._user_cache.clear()

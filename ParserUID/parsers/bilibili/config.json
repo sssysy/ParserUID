@@ -33,6 +33,12 @@
       ],
       "default": "auto"
     },
+    "downgrade_quality_on_oversize": {
+      "type": "bool",
+      "label": "视频超过文件大小上限尝试降低画质",
+      "hint": "开启后，所选画质超过文件大小上限时按画质从高到低依次尝试更低画质",
+      "default": false
+    },
     "video_codec": {
       "type": "select",
       "label": "视频编码偏好",

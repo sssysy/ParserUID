@@ -60,6 +60,10 @@ class DownloadException(ParseException):
     """通用多媒体下载异常。"""
 
 
+class FileSizeLimitException(DownloadException, ResourceLimitException):
+    """下载文件大小超出上限异常。"""
+
+
 class MusicCardException(ParseException):
     """QQ 音乐卡片签名或发送异常。"""
 
