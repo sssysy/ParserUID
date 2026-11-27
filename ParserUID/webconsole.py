@@ -162,6 +162,9 @@ async def _reload_runtime_safely() -> None:
     await close_runtime()
     new_reg = await load_default_registry()
     configure_runtime(ParserRuntime(new_reg))
+    from .ai_runtime import refresh_ai_tools
+
+    await refresh_ai_tools()
 
 
 @api.get("/parser-settings/parsers")

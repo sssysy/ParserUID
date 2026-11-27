@@ -39,6 +39,7 @@ from ..render.models import (
     CardBlock,
     PreviewCard,
 )
+from ..utils.ai_models import AiToolSpec
 from ..utils.downloader import Downloader, download_image
 from ..utils.exceptions import ParseException, RedirectException
 from ..utils.music_card import MusicCardInfo
@@ -106,6 +107,10 @@ class BaseParser:
     def set_logo_path(self, path: Path | None) -> None:
         """由注册表注入经校验的包内 logo 路径。"""
         self._logo_path = path
+
+    def build_ai_tools(self) -> Sequence[AiToolSpec]:
+        """声明本解析器提供给 AI 的工具；注册由插件统一完成。"""
+        return ()
 
     def get_config_value(self, key: str, default: str = "") -> str:
         """安全读取解析器专属用户配置项字符串。"""

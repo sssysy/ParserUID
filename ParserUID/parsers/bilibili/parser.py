@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
+import time
 import asyncio
 from typing import TYPE_CHECKING, ClassVar, TypedDict
 from hashlib import sha256
 from pathlib import Path
 from urllib.parse import urlparse
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import msgspec
 from aiohttp import ClientError
@@ -14,6 +15,7 @@ from aiohttp import ClientError
 from gsuid_core.logger import logger
 from gsuid_core.data_store import get_res_path
 
+from .wbi import WbiKeys, sign_wbi_params, parse_nav_wbi_keys
 from .auth import (
     QrLogin,
     PollResult,
@@ -42,20 +44,32 @@ from .models import (
     BiliVideoInfo,
     BiliDynamicAuthor,
     BiliDynamicContent,
+    BiliVideoSummaryResult,
     decode_live,
     decode_user,
     decode_video,
     decode_bangumi,
+    decode_summary,
     decode_favorite,
 )
 from .comment import comment_limit, decode_comments as decode_card_comments
+from .summary import (
+    build_summary_result,
+    extract_bare_video_id,
+    is_short_bilibili_url,
+    format_video_summary_text,
+    extract_first_bilibili_url,
+    extract_video_target_from_url,
+)
 from ...config import max_file_size_bytes
 from ...sender import ContentItem
+from .ai_summary import AI_TOOLS
 from ...utils.utils import format_size_bytes
 from ...utils.ffmpeg import merge_av
 from ...utils.models import Platform, MediaContent
 from ...render.models import Author, Metric, Comment, PreviewCard
 from ...utils.helpers import build_card_blocks, build_image_blocks
+from ...utils.ai_models import AiToolSpec
 from ...utils.exceptions import ParseException, FileSizeLimitException
 
 if TYPE_CHECKING:
@@ -101,10 +115,12 @@ def _string_list(value: object) -> list[str]:
 
 class BilibiliParser(BaseParser):
     platform: ClassVar[Platform] = Platform(name="bilibili", display_name="哔哩哔哩")
+    API_NAV: ClassVar[str] = "https://api.bilibili.com/x/web-interface/nav"
     API_VIEW: ClassVar[str] = "https://api.bilibili.com/x/web-interface/wbi/view"
     API_VIEW_FALLBACK: ClassVar[str] = "https://api.bilibili.com/x/web-interface/view"
     API_PLAYURL: ClassVar[str] = "https://api.bilibili.com/x/player/wbi/playurl"
     API_PLAYURL_FALLBACK: ClassVar[str] = "https://api.bilibili.com/x/player/playurl"
+    API_CONCLUSION: ClassVar[str] = "https://api.bilibili.com/x/web-interface/view/conclusion/get"
     API_FAVORITE: ClassVar[str] = "https://api.bilibili.com/x/v3/fav/resource/list"
     API_BANGUMI: ClassVar[str] = "https://api.bilibili.com/pgc/view/web/season"
     API_LIVE: ClassVar[str] = "https://api.live.bilibili.com/room/v1/Room/get_info"
@@ -115,6 +131,7 @@ class BilibiliParser(BaseParser):
     API_OPUS: ClassVar[str] = "https://api.bilibili.com/x/polymer/web-dynamic/v1/opus/detail"
     ARTICLE_CARD_API: ClassVar[str] = "https://api.bilibili.com/x/article/view"
     DANMAKU_API: ClassVar[str] = "https://api.bilibili.com/x/v1/dm/list.so?oid={cid}"
+    WBI_CACHE_TTL_SECONDS: ClassVar[float] = 6 * 3600.0
     RETRYABLE_STATUSES: ClassVar[frozenset[int]] = frozenset({403, 404, 408, 425, 429, *range(500, 600)})
     BLOCKED_PCDN_DOMAINS: ClassVar[tuple[str, ...]] = (
         "mcdn.bilivideo.com",
@@ -141,6 +158,8 @@ class BilibiliParser(BaseParser):
         self._set_cookies()
         self._credential_lock = asyncio.Lock()
         self._login_lock = asyncio.Lock()
+        self._wbi_lock = asyncio.Lock()
+        self._wbi_keys: WbiKeys | None = None
         self._user_cache: dict[int | str, BiliUserCard | None] = {}
         self._qr_login: QrLogin | None = None
 
@@ -149,6 +168,10 @@ class BilibiliParser(BaseParser):
         headers = self.headers.copy()
         headers["Referer"] = "https://www.bilibili.com/"
         return headers
+
+    def build_ai_tools(self) -> Sequence[AiToolSpec]:
+        """声明哔哩哔哩提供给 AI 的只读工具。"""
+        return AI_TOOLS
 
     @property
     def quality(self) -> int:
@@ -170,6 +193,57 @@ class BilibiliParser(BaseParser):
         del url
         self._set_cookies()
         return self.headers.copy()
+
+    def _invalidate_wbi_keys(self) -> None:
+        self._wbi_keys = None
+
+    @staticmethod
+    def _has_wbi_risk_or_sign_error(payload: Mapping[str, object]) -> bool:
+        code = payload.get("code")
+        if code in (-400, -403):
+            return True
+        data = payload.get("data")
+        return isinstance(data, Mapping) and bool(data.get("v_voucher"))
+
+    async def _get_wbi_keys(self, *, force_refresh: bool = False) -> WbiKeys | None:
+        now = time.monotonic()
+        cached = self._wbi_keys
+        if not force_refresh and cached is not None and now - cached.fetched_at < self.WBI_CACHE_TTL_SECONDS:
+            return cached
+
+        async with self._wbi_lock:
+            now = time.monotonic()
+            cached = self._wbi_keys
+            if not force_refresh and cached is not None and now - cached.fetched_at < self.WBI_CACHE_TTL_SECONDS:
+                return cached
+            try:
+                payload = await self._get_json(
+                    self.API_NAV,
+                    error="获取哔哩哔哩 WBI 密钥失败",
+                )
+            except ParseException:
+                return None
+            keys = parse_nav_wbi_keys(payload, fetched_at=time.monotonic())
+            if keys is None:
+                logger.warning("[Parser·哔哩哔哩] nav 接口未返回有效 wbi_img")
+                return None
+            self._wbi_keys = keys
+            return keys
+
+    async def _sign_wbi_params(
+        self,
+        params: Mapping[str, str | int],
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, str] | None:
+        keys = await self._get_wbi_keys(force_refresh=force_refresh)
+        if keys is None:
+            return None
+        return sign_wbi_params(
+            params,
+            img_key=keys.img_key,
+            sub_key=keys.sub_key,
+        )
 
     async def _get_json(
         self,
@@ -303,13 +377,22 @@ class BilibiliParser(BaseParser):
         return await self._parse_bangumi_by_id(searched.group("kind"), int(searched.group("id")))
 
     async def _fetch_video(self, bvid: str) -> BiliVideoInfo:
-        try:
-            payload = await self._get_json(
-                self.API_VIEW,
-                params={"bvid": bvid},
-                error="获取视频信息失败",
-            )
-        except ParseException:
+        payload: dict[str, object] | None = None
+        signed_params = await self._sign_wbi_params({"bvid": bvid})
+        if signed_params is not None:
+            try:
+                candidate = await self._get_json(
+                    self.API_VIEW,
+                    params=signed_params,
+                    error="获取视频信息失败",
+                )
+                if self._has_wbi_risk_or_sign_error(candidate):
+                    self._invalidate_wbi_keys()
+                elif candidate.get("code") == 0:
+                    payload = candidate
+            except ParseException:
+                pass
+        if payload is None:
             payload = await self._get_json(
                 self.API_VIEW_FALLBACK,
                 params={"bvid": bvid},
@@ -498,15 +581,23 @@ class BilibiliParser(BaseParser):
         for use_auth in (True, False):
             for api_url in (self.API_PLAYURL, self.API_PLAYURL_FALLBACK):
                 headers = self._request_headers(api_url) if use_auth else dict(base_headers)
+                request_params: Mapping[str, str | int] = params
+                if api_url == self.API_PLAYURL:
+                    signed_params = await self._sign_wbi_params(params)
+                    if signed_params is None:
+                        continue
+                    request_params = signed_params
                 try:
                     payload = await self._get_json(
                         api_url,
-                        params=params,
+                        params=request_params,
                         headers=headers,
                         error="获取视频播放流失败",
                     )
                 except ParseException:
                     continue
+                if api_url == self.API_PLAYURL and self._has_wbi_risk_or_sign_error(payload):
+                    self._invalidate_wbi_keys()
                 if payload.get("code") != 0:
                     message = str(payload.get("message") or message)
                     continue
@@ -888,7 +979,104 @@ class BilibiliParser(BaseParser):
     async def close_session(self) -> None:
         self._user_cache.clear()
         self._credential = None
+        self._wbi_keys = None
         await super().close_session()
+
+    async def resolve_video_target(self, target: str) -> tuple[str, int]:
+        """从视频链接、短链或 BV/AV 号中解析出 (bvid, page)。"""
+        text = target.strip()
+        if not text:
+            raise ParseException("请提供哔哩哔哩视频链接或 BV/AV 号")
+
+        url = extract_first_bilibili_url(text)
+        if url is not None:
+            direct = extract_video_target_from_url(url)
+            if direct is not None:
+                return direct
+            if is_short_bilibili_url(url):
+                chain = await self.get_redirect_chain(url, headers=self._request_headers(url))
+                for page_url in reversed(chain):
+                    matched = extract_video_target_from_url(page_url)
+                    if matched is not None:
+                        return matched
+                raise ParseException("短链跳转后未匹配到哔哩哔哩视频")
+            raise ParseException("该哔哩哔哩链接不是视频链接，暂不支持 AI 总结")
+
+        bare = extract_bare_video_id(text)
+        if bare is not None:
+            return bare
+        raise ParseException("未识别到有效的哔哩哔哩视频链接或 BV/AV 号")
+
+    async def fetch_video_summary(self, target: str, *, page: int = 0) -> BiliVideoSummaryResult:
+        """获取视频元信息与 B 站官方 AI 总结。"""
+        bvid, parsed_page = await self.resolve_video_target(target)
+        effective_page = page if page > 0 else parsed_page
+        info = await self._fetch_video(bvid)
+        pages = info.pages or []
+        if not pages:
+            if effective_page > 1:
+                raise ParseException(f"该视频仅 1 个分集，无法获取第 {effective_page} 集")
+            cid = info.cid
+            duration = info.duration
+            part_title = info.title
+            total_pages = 1
+        else:
+            if effective_page > len(pages):
+                raise ParseException(f"视频分集 p={effective_page} 超出范围（共 {len(pages)} 集）")
+            selected = pages[effective_page - 1]
+            cid = selected.cid
+            duration = selected.duration
+            part_title = selected.part or info.title
+            total_pages = len(pages)
+        if not cid:
+            raise ParseException("视频分集信息缺失")
+
+        base_params: dict[str, str | int] = {"bvid": info.bvid, "cid": cid}
+        if info.owner.mid > 0:
+            base_params["up_mid"] = info.owner.mid
+
+        signed_params = await self._sign_wbi_params(base_params)
+        if signed_params is None:
+            raise ParseException("获取 B 站 WBI 签名密钥失败，请稍后重试")
+
+        payload = await self._get_json(
+            self.API_CONCLUSION,
+            params=signed_params,
+            error="获取视频 AI 总结失败",
+        )
+        if self._has_wbi_risk_or_sign_error(payload):
+            self._invalidate_wbi_keys()
+            refreshed_params = await self._sign_wbi_params(base_params, force_refresh=True)
+            if refreshed_params is not None:
+                payload = await self._get_json(
+                    self.API_CONCLUSION,
+                    params=refreshed_params,
+                    error="获取视频 AI 总结失败",
+                )
+
+        try:
+            reply = decode_summary(payload)
+        except (msgspec.ValidationError, ValueError) as exc:
+            raise ParseException("AI 总结响应解析失败") from exc
+
+        url = f"https://www.bilibili.com/video/{info.bvid}"
+        if effective_page > 1:
+            url += f"?p={effective_page}"
+        return build_summary_result(
+            info=info,
+            cid=cid,
+            page=effective_page,
+            total_pages=total_pages,
+            part_title=part_title,
+            duration=duration,
+            url=url,
+            reply=reply,
+        )
+
+    async def fetch_video_summary_text(self, target: str, *, page: int = 0) -> str:
+        """获取并格式化供 AI 使用的视频总结文本。"""
+        summary_result = await self.fetch_video_summary(target, page=page)
+        return format_video_summary_text(summary_result)
 
     async def _ensure_credential(self) -> BiliCredential | None:
         if self._credential is not None and not self._credential.needs_refresh:

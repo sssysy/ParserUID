@@ -73,6 +73,10 @@ class RegistrySnapshot:
         """按平台名返回已启用的解析器实例。"""
         return self._parsers.get(name)
 
+    def parsers(self) -> tuple[BaseParser, ...]:
+        """返回当前已启用解析器的只读快照。"""
+        return tuple(self._parsers.values())
+
     async def close(self) -> None:
         tasks = [parser.close() for parser in self._parsers.values()]
         if tasks:

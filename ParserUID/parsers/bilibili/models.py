@@ -264,6 +264,75 @@ class BiliDynamicContent:
     is_article: bool = False
 
 
+class BiliSummaryPartOutline(Struct):
+    timestamp: int = 0
+    content: str = ""
+
+
+class BiliSummaryOutline(Struct):
+    title: str = ""
+    timestamp: int = 0
+    part_outline: list[BiliSummaryPartOutline] | None = None
+
+
+class BiliSummaryPartSubtitle(Struct):
+    content: str = ""
+    start_timestamp: int = 0
+    end_timestamp: int = 0
+
+
+class BiliSummarySubtitle(Struct):
+    title: str = ""
+    timestamp: int = 0
+    part_subtitle: list[BiliSummaryPartSubtitle] | None = None
+
+
+class BiliSummaryModelResult(Struct):
+    result_type: int = 0
+    summary: str | None = None
+    outline: list[BiliSummaryOutline] | None = None
+    subtitle: list[BiliSummarySubtitle] | None = None
+
+
+class BiliSummaryData(Struct):
+    code: int = -1
+    stid: str | None = None
+    status: int = 0
+    like_num: int = 0
+    dislike_num: int = 0
+    model_result: BiliSummaryModelResult | None = None
+
+
+class BiliSummaryReply(Struct):
+    code: int = 0
+    message: str = ""
+    data: BiliSummaryData | None = None
+
+
+@dataclass(slots=True)
+class BiliVideoSummaryResult:
+    bvid: str
+    aid: int
+    cid: int
+    page: int
+    total_pages: int
+    part_title: str
+    title: str
+    author_name: str
+    author_mid: int
+    duration: int
+    url: str
+    desc: str
+    status_code: int
+    data_code: int
+    status_message: str
+    stid: str = ""
+    result_type: int = 0
+    summary: str = ""
+    outline: list[BiliSummaryOutline] = field(default_factory=list)
+    subtitle_text: str = ""
+
+
 def decode_video(payload: object) -> BiliVideoInfo:
     reply = msgspec.convert(payload, type=BiliVideoView)
     if reply.code != 0 or reply.data is None:
@@ -306,3 +375,7 @@ def decode_user(payload: object) -> BiliUserCard | None:
     if card.likes is None and reply.data.like_num:
         card.likes = BiliUserLikes(like_num=reply.data.like_num)
     return card
+
+
+def decode_summary(payload: object) -> BiliSummaryReply:
+    return msgspec.convert(payload, type=BiliSummaryReply)
