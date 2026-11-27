@@ -36,8 +36,14 @@
   const refs = {
     layout: document.getElementById("parser-layout"),
     parserSearch: document.getElementById("parser-search"),
+    parserSelectAll: document.getElementById("parser-select-all"),
+    parserClearSelect: document.getElementById("parser-clear-select"),
+    parserSelectionHint: document.getElementById("parser-selection-hint"),
     parserList: document.getElementById("parser-list"),
     parserDetail: document.getElementById("parser-detail"),
+    parserMobileBatchBar: document.getElementById("parser-mobile-batch-bar"),
+    parserMobileBatchInfo: document.getElementById("parser-mobile-batch-info"),
+    parserOpenBatch: document.getElementById("parser-open-batch"),
     skinList: document.getElementById("skin-list"),
     skinMessage: document.getElementById("skin-message"),
     snackbar: document.getElementById("snackbar"),
@@ -52,8 +58,14 @@
     discardAll: document.getElementById("discard-all"),
     accessLayout: document.getElementById("access-layout"),
     accessSearch: document.getElementById("access-search"),
+    accessSelectAll: document.getElementById("access-select-all"),
+    accessClearSelect: document.getElementById("access-clear-select"),
+    accessSelectionHint: document.getElementById("access-selection-hint"),
     accessParserList: document.getElementById("access-parser-list"),
     accessDetail: document.getElementById("access-detail"),
+    accessMobileBatchBar: document.getElementById("access-mobile-batch-bar"),
+    accessMobileBatchInfo: document.getElementById("access-mobile-batch-info"),
+    accessOpenBatch: document.getElementById("access-open-batch"),
     tabs: [...document.querySelectorAll("[data-tab]")],
     panels: {
       parsers: document.getElementById("panel-parsers"),
@@ -87,17 +99,23 @@
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path fill="currentColor" d="m6.7 5.3 5.3 5.29 5.3-5.3 1.4 1.42-5.29 5.3 5.3 5.29-1.42 1.42-5.3-5.3-5.29 5.3-1.42-1.42 5.3-5.3-5.3-5.29 1.42-1.42Z"/>
       </svg>`,
+    plus: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="M11 13H5v-2h6V5h2v6h6v2h-6v6h-2v-6Z"/>
+      </svg>`,
   };
 
   const state = {
     parsers: [],
     selectedName: null,
+    selectedNames: new Set(),
     drafts: new Map(),
     query: "",
     loadError: "",
     saving: false,
     detailOpen: false,
     accessDetailOpen: false,
+    mobileBatchOpen: false,
     accessQuery: "",
     listMotionKey: "",
     detailMotionKey: "",
@@ -302,7 +320,74 @@
     return state.parsers.find((parser) => parser.name === state.selectedName);
   }
 
+  function isBatchMode() {
+    return state.selectedNames.size >= 2;
+  }
+
+  function selectedBatchParsers() {
+    return state.parsers.filter((parser) => state.selectedNames.has(parser.name));
+  }
+
+  function filterParsersByQuery(parsers, rawQuery) {
+    const query = rawQuery.trim().toLowerCase();
+    if (!query) return [...parsers];
+    return parsers.filter(
+      (parser) =>
+        parser.name.toLowerCase().includes(query) ||
+        parser.display_name.toLowerCase().includes(query),
+    );
+  }
+
+  function computeCommonFields(targets) {
+    if (!targets.length) return [];
+    const firstFields = targets[0].fields.filter((field) => !field.secret);
+    const common = [];
+    for (const field of firstFields) {
+      let matchedAll = true;
+      let resolvedHint = field.hint || "";
+      for (let index = 1; index < targets.length; index += 1) {
+        const candidate = targets[index].fields.find(
+          (item) =>
+            item.key === field.key &&
+            !item.secret &&
+            item.type === field.type,
+        );
+        if (!candidate) {
+          matchedAll = false;
+          break;
+        }
+        if (field.type === "select") {
+          const leftOpts = field.options || [];
+          const rightOpts = candidate.options || [];
+          const sameOptions =
+            leftOpts.length === rightOpts.length &&
+            leftOpts.every((opt, optIdx) => opt === rightOpts[optIdx]);
+          if (!sameOptions) {
+            matchedAll = false;
+            break;
+          }
+        }
+        if (!resolvedHint && candidate.hint) {
+          resolvedHint = candidate.hint;
+        }
+      }
+      if (matchedAll) {
+        common.push({
+          ...field,
+          hint: resolvedHint || null,
+        });
+      }
+    }
+    return common;
+  }
+
   function ensureSelection() {
+    const validNames = new Set(state.parsers.map((parser) => parser.name));
+    for (const name of [...state.selectedNames]) {
+      if (!validNames.has(name)) {
+        state.selectedNames.delete(name);
+      }
+    }
     if (!state.parsers.length) {
       state.selectedName = null;
       return;
@@ -339,7 +424,11 @@
     const dirtyAccess = dirtyAccessEntries();
     const count = dirty.length + dirtyAccess.length;
     refs.saveAll.disabled = !count || state.saving;
-    refs.saveAll.textContent = state.saving ? "保存中" : "保存";
+    refs.saveAll.textContent = state.saving
+      ? "保存中"
+      : isBatchMode()
+        ? "批量保存"
+        : "保存";
     refs.discardAll.hidden = !count || state.saving;
     refs.saveStatus.hidden = !count;
     refs.saveStatus.textContent = count
@@ -351,17 +440,136 @@
     }
   }
 
+  function syncSelectionToolbar({
+    visible,
+    selectAllBtn,
+    clearBtn,
+    hintEl,
+    mobileBar,
+    mobileInfo,
+  }) {
+    const allVisibleSelected =
+      visible.length > 0 &&
+      visible.every((parser) => state.selectedNames.has(parser.name));
+    selectAllBtn.textContent = allVisibleSelected ? "取消全选" : "全选";
+    selectAllBtn.disabled = visible.length === 0;
+    clearBtn.hidden = state.selectedNames.size === 0;
+    if (state.selectedNames.size > 0) {
+      hintEl.hidden = false;
+      hintEl.textContent = isBatchMode()
+        ? `已勾选 ${state.selectedNames.size} 项（批量设置中）`
+        : "已勾选 1 项，再勾选 1 项进入批量设置";
+    } else {
+      hintEl.hidden = true;
+      hintEl.textContent = "";
+    }
+    const batch = isBatchMode();
+    mobileBar.hidden = !batch;
+    mobileInfo.textContent = batch
+      ? `已选 ${state.selectedNames.size} 个解析器`
+      : "";
+  }
+
+  function createRowCheckButton(parser) {
+    const checked = state.selectedNames.has(parser.name);
+    const button = createElement(
+      "button",
+      `parser-check-btn${checked ? " is-checked" : ""}`,
+    );
+    button.type = "button";
+    button.setAttribute("role", "checkbox");
+    button.setAttribute("aria-checked", checked ? "true" : "false");
+    button.setAttribute("aria-label", `勾选 ${parser.display_name}`);
+    const box = createElement("span", "parser-checkbox");
+    box.setAttribute("aria-hidden", "true");
+    if (checked) {
+      box.innerHTML = ICONS.check;
+    }
+    button.append(box);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleParserChecked(parser.name);
+    });
+    return button;
+  }
+
+  function toggleParserChecked(name) {
+    if (state.selectedNames.has(name)) {
+      state.selectedNames.delete(name);
+    } else {
+      state.selectedNames.add(name);
+    }
+    if (!isBatchMode() && state.mobileBatchOpen) {
+      state.mobileBatchOpen = false;
+      state.detailOpen = false;
+      state.accessDetailOpen = false;
+      refs.layout.classList.remove("is-detail-open");
+      refs.accessLayout.classList.remove("is-detail-open");
+    }
+    renderParserList();
+    renderDetail();
+    renderAccessParserList();
+    renderAccessDetail();
+    refreshGlobalSaveState();
+  }
+
+  function toggleSelectAllVisible(rawQuery) {
+    const visible = filterParsersByQuery(state.parsers, rawQuery);
+    if (!visible.length) return;
+    const allSelected = visible.every((parser) =>
+      state.selectedNames.has(parser.name),
+    );
+    for (const parser of visible) {
+      if (allSelected) {
+        state.selectedNames.delete(parser.name);
+      } else {
+        state.selectedNames.add(parser.name);
+      }
+    }
+    if (!isBatchMode() && state.mobileBatchOpen) {
+      state.mobileBatchOpen = false;
+      state.detailOpen = false;
+      state.accessDetailOpen = false;
+      refs.layout.classList.remove("is-detail-open");
+      refs.accessLayout.classList.remove("is-detail-open");
+    }
+    renderParserList();
+    renderDetail();
+    renderAccessParserList();
+    renderAccessDetail();
+    refreshGlobalSaveState();
+  }
+
+  function clearAllSelected() {
+    state.selectedNames.clear();
+    if (state.mobileBatchOpen) {
+      state.mobileBatchOpen = false;
+      state.detailOpen = false;
+      state.accessDetailOpen = false;
+      refs.layout.classList.remove("is-detail-open");
+      refs.accessLayout.classList.remove("is-detail-open");
+    }
+    renderParserList();
+    renderDetail();
+    renderAccessParserList();
+    renderAccessDetail();
+    refreshGlobalSaveState();
+  }
+
   function renderParserList() {
     refs.parserList.replaceChildren();
     const query = state.query.trim().toLowerCase();
     const filtered = sortedParsers(
-      state.parsers.filter(
-        (parser) =>
-          !query ||
-          parser.name.toLowerCase().includes(query) ||
-          parser.display_name.toLowerCase().includes(query),
-      ),
+      filterParsersByQuery(state.parsers, state.query),
     );
+    syncSelectionToolbar({
+      visible: filtered,
+      selectAllBtn: refs.parserSelectAll,
+      clearBtn: refs.parserClearSelect,
+      hintEl: refs.parserSelectionHint,
+      mobileBar: refs.parserMobileBatchBar,
+      mobileInfo: refs.parserMobileBatchInfo,
+    });
     const motionKey = `${query}|${filtered
       .map((parser) => `${parser.name}:${Number(getDraft(parser).enabled)}`)
       .join("|")}`;
@@ -387,8 +595,20 @@
       return;
     }
 
+    const batch = isBatchMode();
     filtered.forEach((parser, index) => {
       const draft = getDraft(parser);
+      const selected = !batch && parser.name === state.selectedName;
+      const row = createElement(
+        "div",
+        `parser-item-row${selected ? " is-selected" : ""}`,
+      );
+      row.dataset.name = parser.name;
+      row.style.setProperty("--item-index", String(Math.min(index, 9)));
+      if (animateItems) {
+        row.classList.add("is-entering");
+      }
+
       const item = createElement("button", "parser-item");
       item.type = "button";
       item.dataset.name = parser.name;
@@ -397,14 +617,7 @@
         "aria-label",
         `${parser.display_name}，${draft.enabled ? "已启用" : "已停用"}`,
       );
-      item.setAttribute(
-        "aria-selected",
-        parser.name === state.selectedName ? "true" : "false",
-      );
-      item.style.setProperty("--item-index", String(Math.min(index, 9)));
-      if (animateItems) {
-        item.classList.add("is-entering");
-      }
+      item.setAttribute("aria-selected", selected ? "true" : "false");
 
       const copy = createElement("span", "parser-copy");
       const nameLine = createElement("span", "parser-name-line");
@@ -424,11 +637,18 @@
       if (isDraftDirty(draft)) {
         item.append(createElement("span", "draft-badge"));
       }
-      item.addEventListener("click", () => requestSelectParser(parser.name));
-      item.addEventListener("animationend", () => {
-        item.classList.remove("is-entering");
+      item.addEventListener("click", () => {
+        if (isBatchMode()) {
+          toggleParserChecked(parser.name);
+        } else {
+          requestSelectParser(parser.name);
+        }
       });
-      refs.parserList.append(item);
+      row.addEventListener("animationend", () => {
+        row.classList.remove("is-entering");
+      });
+      row.append(item, createRowCheckButton(parser));
+      refs.parserList.append(row);
     });
   }
 
@@ -443,6 +663,7 @@
 
   function selectParser(name) {
     state.selectedName = name;
+    state.mobileBatchOpen = false;
     state.detailOpen = true;
     refs.layout.classList.add("is-detail-open");
     updateActiveRail();
@@ -455,26 +676,30 @@
 
   function closeDetail() {
     state.detailOpen = false;
+    state.mobileBatchOpen = false;
     refs.layout.classList.remove("is-detail-open");
   }
 
   function closeAccessDetail() {
     state.accessDetailOpen = false;
+    state.mobileBatchOpen = false;
     refs.accessLayout.classList.remove("is-detail-open");
   }
 
   function renderAccessParserList() {
     const query = state.accessQuery.trim().toLowerCase();
-    const visible = state.parsers
-      .filter(
-        (parser) =>
-          !query ||
-          parser.name.toLowerCase().includes(query) ||
-          parser.display_name.toLowerCase().includes(query),
-      )
+    const visible = filterParsersByQuery(state.parsers, state.accessQuery)
       .sort((left, right) =>
         left.display_name.localeCompare(right.display_name, "zh-CN"),
       );
+    syncSelectionToolbar({
+      visible,
+      selectAllBtn: refs.accessSelectAll,
+      clearBtn: refs.accessClearSelect,
+      hintEl: refs.accessSelectionHint,
+      mobileBar: refs.accessMobileBatchBar,
+      mobileInfo: refs.accessMobileBatchInfo,
+    });
 
     refs.accessParserList.replaceChildren();
     if (!visible.length) {
@@ -497,17 +722,22 @@
     const animateItems = state.accessMotionKey !== motionKey;
     state.accessMotionKey = motionKey;
 
+    const batch = isBatchMode();
     visible.forEach((parser, index) => {
+      const selected = !batch && parser.name === state.selectedName;
+      const row = createElement(
+        "div",
+        `parser-item-row${selected ? " is-selected" : ""}`,
+      );
+      row.dataset.name = parser.name;
+      row.style.setProperty("--item-index", String(Math.min(index, 9)));
+      if (animateItems) row.classList.add("is-entering");
+
       const item = createElement("button", "parser-item");
       item.type = "button";
       item.dataset.name = parser.name;
       item.setAttribute("role", "option");
-      item.setAttribute(
-        "aria-selected",
-        parser.name === state.selectedName ? "true" : "false",
-      );
-      item.style.setProperty("--item-index", String(Math.min(index, 9)));
-      if (animateItems) item.classList.add("is-entering");
+      item.setAttribute("aria-selected", selected ? "true" : "false");
 
       const copy = createElement("span", "parser-copy");
       const groupSummary = parser.whitelist_enabled
@@ -521,16 +751,27 @@
         createElement("span", "parser-meta", `${groupSummary} / ${privateSummary}`),
       );
       item.append(copy);
-      item.addEventListener("click", () => selectAccessParser(parser.name));
-      item.addEventListener("animationend", () => {
-        item.classList.remove("is-entering");
+      if (isAccessDirty(parser)) {
+        item.append(createElement("span", "draft-badge"));
+      }
+      item.addEventListener("click", () => {
+        if (isBatchMode()) {
+          toggleParserChecked(parser.name);
+        } else {
+          selectAccessParser(parser.name);
+        }
       });
-      refs.accessParserList.append(item);
+      row.addEventListener("animationend", () => {
+        row.classList.remove("is-entering");
+      });
+      row.append(item, createRowCheckButton(parser));
+      refs.accessParserList.append(row);
     });
   }
 
   function selectAccessParser(name) {
     state.selectedName = name;
+    state.mobileBatchOpen = false;
     state.accessDetailOpen = true;
     refs.accessLayout.classList.add("is-detail-open");
     updateActiveRail();
@@ -541,25 +782,29 @@
   }
 
   function updateAccessActiveRail() {
-    for (const item of refs.accessParserList.querySelectorAll(".parser-item")) {
-      item.setAttribute(
-        "aria-selected",
-        item.dataset.name === state.selectedName ? "true" : "false",
-      );
+    const batch = isBatchMode();
+    for (const row of refs.accessParserList.querySelectorAll(".parser-item-row")) {
+      const selected = !batch && row.dataset.name === state.selectedName;
+      row.classList.toggle("is-selected", selected);
+      row
+        .querySelector(".parser-item")
+        ?.setAttribute("aria-selected", selected ? "true" : "false");
     }
     updateParserActiveRail();
   }
 
   function updateParserActiveRail() {
-    for (const item of refs.parserList.querySelectorAll(".parser-item")) {
-      item.setAttribute(
-        "aria-selected",
-        item.dataset.name === state.selectedName ? "true" : "false",
-      );
+    const batch = isBatchMode();
+    for (const row of refs.parserList.querySelectorAll(".parser-item-row")) {
+      const selected = !batch && row.dataset.name === state.selectedName;
+      row.classList.toggle("is-selected", selected);
+      row
+        .querySelector(".parser-item")
+        ?.setAttribute("aria-selected", selected ? "true" : "false");
     }
   }
 
-  function createAccessSwitchRow(parser, scope) {
+  function createAccessSwitchRow(targets, scope) {
     const isPrivate = scope === "private";
     const flagKey = isPrivate ? "private_whitelist_enabled" : "whitelist_enabled";
     const title = isPrivate ? "启用私聊白名单" : "启用群聊白名单";
@@ -572,10 +817,13 @@
       createElement("span", "setting-label", title),
       createElement("p", "setting-hint", hint),
     );
+    const allChecked = targets.every((parser) => Boolean(parser[flagKey]));
     const control = createSwitch(
-      Boolean(parser[flagKey]),
+      allChecked,
       (checked) => {
-        parser[flagKey] = Boolean(checked);
+        for (const parser of targets) {
+          parser[flagKey] = Boolean(checked);
+        }
         refreshAccessDirtyState();
         renderAccessDetail();
       },
@@ -585,7 +833,7 @@
     return row;
   }
 
-  function createAccessIdList(parser, scope, kind) {
+  function createAccessIdList(targets, scope, kind) {
     const isPrivate = scope === "private";
     const listKey = isPrivate
       ? kind === "white"
@@ -596,25 +844,59 @@
         : "blacklist";
     const itemName = isPrivate ? "用户 ID" : "群号";
     const list = createElement("div", "group-list");
-    for (const targetId of parser[listKey]) {
-      const chip = createElement("span", "group-chip");
-      const label = createElement("span", "", targetId);
+    const counts = new Map();
+    for (const parser of targets) {
+      for (const targetId of parser[listKey]) {
+        counts.set(targetId, (counts.get(targetId) || 0) + 1);
+      }
+    }
+    for (const [targetId, count] of counts.entries()) {
+      const isPartial = targets.length > 1 && count < targets.length;
+      const chip = createElement(
+        "span",
+        `group-chip${isPartial ? " group-chip--partial" : ""}`,
+      );
+      const labelText = isPartial
+        ? `${targetId} (${count}/${targets.length})`
+        : targetId;
+      chip.append(createElement("span", "", labelText));
+      if (isPartial) {
+        const sync = createElement("button", "");
+        sync.type = "button";
+        sync.setAttribute(
+          "aria-label",
+          `将${itemName} ${targetId} 补齐到全部已选解析器`,
+        );
+        sync.innerHTML = ICONS.plus;
+        sync.addEventListener("click", () => {
+          for (const parser of targets) {
+            if (!parser[listKey].includes(targetId)) {
+              parser[listKey] = [...parser[listKey], targetId];
+            }
+          }
+          refreshAccessDirtyState();
+          renderAccessDetail();
+        });
+        chip.append(sync);
+      }
       const remove = createElement("button", "");
       remove.type = "button";
       remove.setAttribute("aria-label", `移除${itemName} ${targetId}`);
       remove.innerHTML = ICONS.close;
       remove.addEventListener("click", () => {
-        parser[listKey] = parser[listKey].filter((item) => item !== targetId);
+        for (const parser of targets) {
+          parser[listKey] = parser[listKey].filter((item) => item !== targetId);
+        }
         refreshAccessDirtyState();
         renderAccessDetail();
       });
-      chip.append(label, remove);
+      chip.append(remove);
       list.append(chip);
     }
-    return list;
+    return { list, hasEntries: counts.size > 0 };
   }
 
-  function createAccessSection(parser, scope, kind) {
+  function createAccessSection(targets, scope, kind, idPrefix) {
     const isPrivate = scope === "private";
     const isWhite = kind === "white";
     const listKey = isPrivate
@@ -629,11 +911,14 @@
     const section = createElement("section", "field-section");
     const header = createElement("header", "field-section__header group-section-head");
     header.append(createElement("h2", "", `${scopeLabel}${isWhite ? "白名单" : "黑名单"}`));
+    const { list, hasEntries } = createAccessIdList(targets, scope, kind);
     const clear = createElement("button", "text-button text-button--danger", "清空");
     clear.type = "button";
-    clear.disabled = parser[listKey].length === 0;
+    clear.disabled = !hasEntries;
     clear.addEventListener("click", () => {
-      parser[listKey] = [];
+      for (const parser of targets) {
+        parser[listKey] = [];
+      }
       refreshAccessDirtyState();
       renderAccessDetail();
     });
@@ -646,7 +931,7 @@
     input.type = "text";
     input.inputMode = isPrivate ? "text" : "numeric";
     input.autocomplete = "off";
-    input.id = `access-${parser.name}-${scope}-${kind}`;
+    input.id = `access-${idPrefix}-${scope}-${kind}`;
     input.setAttribute(
       "aria-label",
       `添加到${scopeLabel}${isWhite ? "白" : "黑"}名单的${itemLabel}`,
@@ -672,26 +957,30 @@
         input.focus();
         return;
       }
-      if (parser[listKey].includes(targetId)) {
+      if (targets.every((parser) => parser[listKey].includes(targetId))) {
         showSnackbar(`${targetId} 已在名单中`);
         return;
       }
-      parser[listKey] = [...parser[listKey], targetId];
+      for (const parser of targets) {
+        if (!parser[listKey].includes(targetId)) {
+          parser[listKey] = [...parser[listKey], targetId];
+        }
+      }
       refreshAccessDirtyState();
       renderAccessDetail();
     });
-    row.append(form, createAccessIdList(parser, scope, kind));
+    row.append(form, list);
     row.append(
       createElement(
         "p",
         "field-support",
         isPrivate
           ? isWhite
-            ? "填写用户 ID，可通过私聊命令 psr添加解析白名单{解析器} 来添加私聊用户"
-            : "填写用户 ID，可通过私聊命令 psr添加解析黑名单{解析器} 来添加私聊用户"
+            ? "填写用户 ID，可通过私聊命令 psr添加解析白名单{解析器} / psr删除解析白名单{解析器} 管理私聊用户"
+            : "填写用户 ID，可通过私聊命令 psr添加解析黑名单{解析器} / psr删除解析黑名单{解析器} 管理私聊用户"
           : isWhite
-            ? "填写群号，可通过群聊命令 psr添加解析白名单{解析器} 来添加群聊"
-            : "填写群号，可通过群聊命令 psr添加解析黑名单{解析器} 来添加群聊",
+            ? "填写群号，可通过群聊命令 psr添加解析白名单{解析器} / psr删除解析白名单{解析器} 管理群聊"
+            : "填写群号，可通过群聊命令 psr添加解析黑名单{解析器} / psr删除解析黑名单{解析器} 管理群聊",
       ),
     );
     section.append(header, row);
@@ -703,23 +992,37 @@
       refs.accessDetail.innerHTML = `<div class="empty-state"><p>${escapeHtml(state.loadError)}</p></div>`;
       return;
     }
-    const parser = currentParser();
-    if (!parser) {
+    const batch = isBatchMode();
+    const targets = batch
+      ? selectedBatchParsers()
+      : currentParser()
+        ? [currentParser()]
+        : [];
+    if (!targets.length) {
       refs.accessDetail.innerHTML =
         '<div class="empty-state"><p>选择左侧的解析器以编辑名单。</p></div>';
       return;
     }
 
-    const emptyGroupWhite = parser.whitelist_enabled && parser.whitelist.length === 0;
-    const emptyPrivateWhite =
-      parser.private_whitelist_enabled && parser.private_whitelist.length === 0;
-    if (emptyGroupWhite && emptyPrivateWhite) {
-      showSnackbar("群聊和私聊白名单均已开启且为空，当前所有会话都会被拦截", 4200);
-    } else if (emptyGroupWhite) {
-      showSnackbar("群聊白名单已开启但为空，当前所有群聊都会被拦截", 4200);
-    } else if (emptyPrivateWhite) {
-      showSnackbar("私聊白名单已开启但为空，当前所有私聊都会被拦截", 4200);
+    if (!batch) {
+      const parser = targets[0];
+      const emptyGroupWhite = parser.whitelist_enabled && parser.whitelist.length === 0;
+      const emptyPrivateWhite =
+        parser.private_whitelist_enabled && parser.private_whitelist.length === 0;
+      if (emptyGroupWhite && emptyPrivateWhite) {
+        showSnackbar("群聊和私聊白名单均已开启且为空，当前所有会话都会被拦截", 4200);
+      } else if (emptyGroupWhite) {
+        showSnackbar("群聊白名单已开启但为空，当前所有群聊都会被拦截", 4200);
+      } else if (emptyPrivateWhite) {
+        showSnackbar("私聊白名单已开启但为空，当前所有私聊都会被拦截", 4200);
+      }
     }
+
+    const headingTitle = batch ? "批量设置" : targets[0].display_name;
+    const headingSubtitle = batch
+      ? `已选 ${targets.length} 个解析器 · 批量增删黑白名单`
+      : targets[0].name;
+    const idPrefix = batch ? "batch" : targets[0].name;
 
     refs.accessDetail.innerHTML = `
       <div class="detail-shell">
@@ -735,8 +1038,8 @@
               ${ICONS.back}
             </button>
             <div class="detail-heading">
-              <h1>${escapeHtml(parser.display_name)}</h1>
-              <p>${escapeHtml(parser.name)}</p>
+              <h1>${escapeHtml(headingTitle)}</h1>
+              <p>${escapeHtml(headingSubtitle)}</p>
             </div>
           </div>
         </header>
@@ -746,18 +1049,26 @@
       .querySelector("#access-back")
       .addEventListener("click", closeAccessDetail);
     const body = refs.accessDetail.querySelector(".detail-body");
+    if (batch) {
+      const chips = createElement("div", "selected-chips");
+      for (const parser of targets) {
+        chips.append(createElement("span", "selected-chip", parser.display_name));
+      }
+      body.append(chips);
+    }
     const groupMode = createElement("section", "field-section");
-    groupMode.append(createAccessSwitchRow(parser, "group"));
+    groupMode.append(createAccessSwitchRow(targets, "group"));
     const privateMode = createElement("section", "field-section");
-    privateMode.append(createAccessSwitchRow(parser, "private"));
+    privateMode.append(createAccessSwitchRow(targets, "private"));
     body.append(
       groupMode,
-      createAccessSection(parser, "group", "white"),
-      createAccessSection(parser, "group", "black"),
+      createAccessSection(targets, "group", "white", idPrefix),
+      createAccessSection(targets, "group", "black", idPrefix),
       privateMode,
-      createAccessSection(parser, "private", "white"),
-      createAccessSection(parser, "private", "black"),
+      createAccessSection(targets, "private", "white", idPrefix),
+      createAccessSection(targets, "private", "black", idPrefix),
     );
+    refreshGlobalSaveState();
   }
 
   function createSwitch(checked, onChange, label) {
@@ -926,8 +1237,13 @@
       return;
     }
 
-    const parser = currentParser();
-    if (!parser) {
+    const batch = isBatchMode();
+    const targets = batch
+      ? selectedBatchParsers()
+      : currentParser()
+        ? [currentParser()]
+        : [];
+    if (!targets.length) {
       refs.parserDetail.innerHTML = `
         <div class="empty-state">
           <p>选择左侧的解析器以编辑配置。</p>
@@ -935,12 +1251,20 @@
       return;
     }
 
+    const parser = targets[0];
     const draft = getDraft(parser);
-    const regularFields = parser.fields.filter((field) => !field.secret);
-    const secretFields = parser.fields.filter((field) => field.secret);
-    const dirty = isDraftDirty(draft);
-    const animateDetail = state.detailMotionKey !== parser.name;
-    state.detailMotionKey = parser.name;
+    const regularFields = batch
+      ? computeCommonFields(targets)
+      : parser.fields.filter((field) => !field.secret);
+    const secretFields = batch
+      ? []
+      : parser.fields.filter((field) => field.secret);
+    const enabledChecked = batch
+      ? targets.every((item) => getDraft(item).enabled)
+      : draft.enabled;
+    const motionTarget = batch ? "__batch__" : parser.name;
+    const animateDetail = state.detailMotionKey !== motionTarget;
+    state.detailMotionKey = motionTarget;
 
     refs.parserDetail.innerHTML = `
       <div class="detail-shell ${animateDetail ? "is-entering" : ""}">
@@ -956,14 +1280,22 @@
               ${ICONS.back}
             </button>
             <div class="detail-heading">
-              <h1>${escapeHtml(parser.display_name)}</h1>
-              <p>${escapeHtml(parser.name)}</p>
+              <h1>${batch ? "批量设置" : escapeHtml(parser.display_name)}</h1>
+              <p>${
+                batch
+                  ? `已选 ${targets.length} 个解析器 · 仅展示共同非敏感配置项`
+                  : escapeHtml(parser.name)
+              }</p>
             </div>
-            <span class="status-chip ${
-              draft.enabled ? "status-chip--enabled" : ""
-            }">
-              ${draft.enabled ? "已启用" : "已停用"}
-            </span>
+            ${
+              batch
+                ? ""
+                : `<span class="status-chip ${
+                    draft.enabled ? "status-chip--enabled" : ""
+                  }">
+                    ${draft.enabled ? "已启用" : "已停用"}
+                  </span>`
+            }
           </div>
 
           <div class="enabled-row">
@@ -975,8 +1307,10 @@
               <input
                 id="parser-enabled"
                 type="checkbox"
-                ${draft.enabled ? "checked" : ""}
-                aria-label="启用 ${escapeHtml(parser.display_name)}"
+                ${enabledChecked ? "checked" : ""}
+                aria-label="${
+                  batch ? "批量启用解析器" : `启用 ${escapeHtml(parser.display_name)}`
+                }"
               />
               <span class="switch-track"></span>
             </span>
@@ -984,10 +1318,21 @@
         </header>
 
         <div class="detail-body">
+          ${
+            batch
+              ? `<div class="selected-chips">${targets
+                  .map((item) => `<span class="selected-chip">${escapeHtml(item.display_name)}</span>`)
+                  .join("")}</div>`
+              : ""
+          }
           <section class="field-section">
             <header class="field-section__header">
-              <h2>解析偏好</h2>
-              <p>控制媒体输出和平台行为。</p>
+              <h2>${batch ? "共同解析偏好" : "解析偏好"}</h2>
+              <p>${
+                batch
+                  ? "仅展示所有已选解析器共有的非敏感配置项。"
+                  : "控制媒体输出和平台行为。"
+              }</p>
             </header>
             <div class="js-regular-fields"></div>
           </section>
@@ -1015,12 +1360,39 @@
     const regularContainer = refs.parserDetail.querySelector(
       ".js-regular-fields",
     );
-    for (const field of regularFields) {
+    if (batch && !regularFields.length) {
       regularContainer.append(
-        field.type === "bool"
-          ? renderBooleanField(field, draft, parser)
-          : renderInputField(field, draft, parser),
+        createElement(
+          "p",
+          "field-support",
+          "当前所选解析器暂无其他共同非敏感配置项，可直接在上方批量切换启停。",
+        ),
       );
+    } else {
+      const idPrefix = batch ? "batch" : parser.name;
+      for (const field of regularFields) {
+        const values = targets.map((item) => getDraft(item).values[field.key]);
+        const mixed =
+          batch && new Set(values.map((val) => valueKey(val))).size > 1;
+        const currentValue = mixed
+          ? field.type === "bool"
+            ? false
+            : field.type === "list"
+              ? []
+              : ""
+          : values[0];
+        const onUpdate = (nextValue) => {
+          for (const item of targets) {
+            getDraft(item).values[field.key] = cloneValue(nextValue);
+          }
+          refreshDirtyState();
+        };
+        regularContainer.append(
+          field.type === "bool"
+            ? renderBooleanField(field, currentValue, onUpdate, idPrefix)
+            : renderInputField(field, currentValue, onUpdate, idPrefix),
+        );
+      }
     }
 
     const secretContainer = refs.parserDetail.querySelector(
@@ -1037,7 +1409,9 @@
     const enabled = refs.parserDetail.querySelector("#parser-enabled");
     if (enabled) {
       enabled.addEventListener("change", () => {
-        draft.enabled = enabled.checked;
+        for (const item of targets) {
+          getDraft(item).enabled = enabled.checked;
+        }
         renderParserList();
         renderDetail();
         refreshGlobalSaveState();
@@ -1046,8 +1420,8 @@
     refreshGlobalSaveState();
   }
 
-  function renderBooleanField(field, draft, parser) {
-    const id = `field-${parser.name}-${field.key}`.replace(
+  function renderBooleanField(field, value, onUpdate, idPrefix) {
+    const id = `field-${idPrefix}-${field.key}`.replace(
       /[^a-zA-Z0-9_-]/g,
       "-",
     );
@@ -1058,11 +1432,8 @@
       copy.append(createElement("p", "setting-hint", field.hint));
     }
     const control = createSwitch(
-      Boolean(draft.values[field.key]),
-      (checked) => {
-        draft.values[field.key] = checked;
-        refreshDirtyState();
-      },
+      Boolean(value),
+      (checked) => onUpdate(checked),
       field.label,
     );
     control.querySelector("input").id = id;
@@ -1070,8 +1441,8 @@
     return row;
   }
 
-  function renderInputField(field, draft, parser) {
-    const id = `field-${parser.name}-${field.key}`.replace(
+  function renderInputField(field, value, onUpdate, idPrefix) {
+    const id = `field-${idPrefix}-${field.key}`.replace(
       /[^a-zA-Z0-9_-]/g,
       "-",
     );
@@ -1084,33 +1455,30 @@
           id,
           label: field.label,
           options: field.options || [],
-          value: draft.values[field.key],
-          onChange: (value) => {
-            draft.values[field.key] = value;
-            refreshDirtyState();
-          },
+          value,
+          onChange: (nextValue) => onUpdate(nextValue),
         }).wrapper,
       );
     } else if (field.type === "text" || field.type === "list") {
-      const value =
+      const textValue =
         field.type === "list"
-          ? Array.isArray(draft.values[field.key])
-            ? draft.values[field.key].join("\n")
+          ? Array.isArray(value)
+            ? value.join("\n")
             : ""
-          : String(draft.values[field.key] ?? "");
+          : String(value ?? "");
       const textarea = makeFilledTextarea({
         id,
         label: field.label,
-        value,
+        value: textValue,
         onInput: (nextValue) => {
-          draft.values[field.key] =
+          onUpdate(
             field.type === "list"
               ? nextValue
                   .split("\n")
                   .map((item) => item.trim())
                   .filter(Boolean)
-              : nextValue;
-          refreshDirtyState();
+              : nextValue,
+          );
         },
       });
       control.append(textarea.wrapper);
@@ -1120,12 +1488,9 @@
         id,
         type: isNumber ? "number" : "text",
         label: field.label,
-        value: String(draft.values[field.key] ?? ""),
+        value: String(value ?? ""),
         step: field.type === "int" ? "1" : field.type === "float" ? "any" : "",
-        onInput: (value) => {
-          draft.values[field.key] = value;
-          refreshDirtyState();
-        },
+        onInput: (nextValue) => onUpdate(nextValue),
       });
       control.append(input.wrapper);
     }
@@ -1501,6 +1866,30 @@
     refs.accessSearch.addEventListener("input", () => {
       state.accessQuery = refs.accessSearch.value;
       renderAccessParserList();
+    });
+    refs.parserSelectAll.addEventListener("click", () => {
+      toggleSelectAllVisible(state.query);
+    });
+    refs.parserClearSelect.addEventListener("click", clearAllSelected);
+    refs.accessSelectAll.addEventListener("click", () => {
+      toggleSelectAllVisible(state.accessQuery);
+    });
+    refs.accessClearSelect.addEventListener("click", clearAllSelected);
+    refs.parserOpenBatch.addEventListener("click", () => {
+      if (!isBatchMode()) return;
+      state.mobileBatchOpen = true;
+      state.detailOpen = true;
+      refs.layout.classList.add("is-detail-open");
+      renderDetail();
+      refs.parserDetail.scrollTop = 0;
+    });
+    refs.accessOpenBatch.addEventListener("click", () => {
+      if (!isBatchMode()) return;
+      state.mobileBatchOpen = true;
+      state.accessDetailOpen = true;
+      refs.accessLayout.classList.add("is-detail-open");
+      renderAccessDetail();
+      refs.accessDetail.scrollTop = 0;
     });
   }
 

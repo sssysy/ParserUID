@@ -77,8 +77,20 @@
         <div class="list-detail" id="parser-layout">
           <aside class="list-pane" aria-label="解析器列表">
             <header class="pane-header">
-              <h1>解析器</h1>
-              <p id="parser-count">正在加载</p>
+              <div class="pane-header__row">
+                <div class="pane-header__title">
+                  <h1>解析器</h1>
+                  <p id="parser-count">正在加载</p>
+                </div>
+                <div class="pane-header__actions">
+                  <button class="chip-action-button" id="parser-select-all" type="button">
+                    全选
+                  </button>
+                  <button class="chip-action-button" id="parser-clear-select" type="button" hidden>
+                    清空
+                  </button>
+                </div>
+              </div>
             </header>
 
             <label class="search-field" for="parser-search">
@@ -96,6 +108,8 @@
               />
             </label>
 
+            <p class="batch-selection-hint" id="parser-selection-hint" hidden></p>
+
             <div
               class="parser-list"
               id="parser-list"
@@ -107,6 +121,13 @@
                 <span></span>
                 <span></span>
               </div>
+            </div>
+
+            <div class="mobile-batch-bar" id="parser-mobile-batch-bar" hidden>
+              <span class="mobile-batch-bar__info" id="parser-mobile-batch-info"></span>
+              <button class="filled-button" id="parser-open-batch" type="button">
+                进入批量设置
+              </button>
             </div>
           </aside>
 
@@ -175,7 +196,19 @@
         <div class="list-detail" id="access-layout">
           <aside class="list-pane" aria-label="解析器名单列表">
             <header class="pane-header">
-              <h1>黑白名单</h1>
+              <div class="pane-header__row">
+                <div class="pane-header__title">
+                  <h1>黑白名单</h1>
+                </div>
+                <div class="pane-header__actions">
+                  <button class="chip-action-button" id="access-select-all" type="button">
+                    全选
+                  </button>
+                  <button class="chip-action-button" id="access-clear-select" type="button" hidden>
+                    清空
+                  </button>
+                </div>
+              </div>
             </header>
 
             <label class="search-field" for="access-search">
@@ -193,12 +226,21 @@
               />
             </label>
 
+            <p class="batch-selection-hint" id="access-selection-hint" hidden></p>
+
             <div
               class="parser-list"
               id="access-parser-list"
               role="listbox"
               aria-label="选择解析器"
             ></div>
+
+            <div class="mobile-batch-bar" id="access-mobile-batch-bar" hidden>
+              <span class="mobile-batch-bar__info" id="access-mobile-batch-info"></span>
+              <button class="filled-button" id="access-open-batch" type="button">
+                进入批量设置
+              </button>
+            </div>
           </aside>
 
           <section

@@ -24,6 +24,7 @@ from .utils.registry import _load_manifest_from_dir, get_builtin_parsers_dir, ge
 _ACCESS_ERROR = "名单更新失败，请稍后再试"
 _reload_lock = asyncio.Lock()
 AccessListKind = Literal["white", "black"]
+AccessAction = Literal["add", "remove"]
 
 
 def _scan_manifests() -> dict[str, ParserManifest]:
@@ -48,6 +49,25 @@ def _add_target_to_lists(
     *,
     is_private: bool = False,
 ) -> tuple[int, str | None]:
+    return _update_target_in_lists(
+        manifests,
+        target_id,
+        parser_name,
+        kind,
+        action="add",
+        is_private=is_private,
+    )
+
+
+def _update_target_in_lists(
+    manifests: dict[str, ParserManifest],
+    target_id: str,
+    parser_name: str,
+    kind: AccessListKind,
+    *,
+    action: AccessAction,
+    is_private: bool = False,
+) -> tuple[int, str | None]:
     if parser_name:
         manifest = manifests.get(parser_name)
         if manifest is None:
@@ -67,16 +87,30 @@ def _add_target_to_lists(
 
         if is_private:
             if kind == "white":
-                private_whitelist = normalize_user_ids([*private_whitelist, target_id])
-                private_whitelist_enabled = True
-            else:
+                if action == "add":
+                    private_whitelist = normalize_user_ids([*private_whitelist, target_id])
+                    private_whitelist_enabled = True
+                else:
+                    private_whitelist = [item for item in private_whitelist if item != target_id]
+                    if not private_whitelist:
+                        private_whitelist_enabled = False
+            elif action == "add":
                 private_blacklist = normalize_user_ids([*private_blacklist, target_id])
+            else:
+                private_blacklist = [item for item in private_blacklist if item != target_id]
         else:
             if kind == "white":
-                whitelist = normalize_group_ids([*whitelist, target_id])
-                whitelist_enabled = True
-            else:
+                if action == "add":
+                    whitelist = normalize_group_ids([*whitelist, target_id])
+                    whitelist_enabled = True
+                else:
+                    whitelist = [item for item in whitelist if item != target_id]
+                    if not whitelist:
+                        whitelist_enabled = False
+            elif action == "add":
                 blacklist = normalize_group_ids([*blacklist, target_id])
+            else:
+                blacklist = [item for item in blacklist if item != target_id]
 
         updated = ParserItemConfig(
             name=config.name,
@@ -93,11 +127,12 @@ def _add_target_to_lists(
     return len(targets), None
 
 
-async def _add_access_target(
+async def _update_access_target(
     bot: Bot,
     ev: Event,
     *,
     kind: AccessListKind,
+    action: AccessAction,
 ) -> None:
     group_id = (ev.group_id or "").strip()
     is_private = not group_id
@@ -109,12 +144,13 @@ async def _add_access_target(
     parser_name = " ".join(ev.text.split())
     try:
         manifests = await asyncio.to_thread(_scan_manifests)
-        count, missing = await asyncio.to_thread(
-            _add_target_to_lists,
+        _count, missing = await asyncio.to_thread(
+            _update_target_in_lists,
             manifests,
             target_id,
             parser_name,
             kind,
+            action=action,
             is_private=is_private,
         )
     except Exception as exc:
@@ -132,7 +168,10 @@ async def _add_access_target(
     target_label = f"私聊用户 {target_id}" if is_private else f"群聊 {target_id}"
     list_label = f"{scope_label}白名单" if kind == "white" else f"{scope_label}黑名单"
     target = parser_name or "全部解析器"
-    await bot.send(f"已将{target_label} 添加到 {target} 的{list_label}")
+    if action == "add":
+        await bot.send(f"已将{target_label} 添加到 {target} 的{list_label}")
+    else:
+        await bot.send(f"已将{target_label} 从 {target} 的{list_label}中移除")
 
 
 sv = SV("ParserUID 解析器名单", pm=0, area="ALL")
@@ -141,10 +180,22 @@ sv = SV("ParserUID 解析器名单", pm=0, area="ALL")
 @sv.on_command("添加解析白名单", block=False)
 async def add_parser_whitelist_group(bot: Bot, ev: Event) -> None:
     """把当前群聊或私聊用户加入指定解析器或全部解析器的白名单。"""
-    await _add_access_target(bot, ev, kind="white")
+    await _update_access_target(bot, ev, kind="white", action="add")
 
 
 @sv.on_command("添加解析黑名单", block=False)
 async def add_parser_blacklist_group(bot: Bot, ev: Event) -> None:
     """把当前群聊或私聊用户加入指定解析器或全部解析器的黑名单。"""
-    await _add_access_target(bot, ev, kind="black")
+    await _update_access_target(bot, ev, kind="black", action="add")
+
+
+@sv.on_command("删除解析白名单", block=False)
+async def remove_parser_whitelist_group(bot: Bot, ev: Event) -> None:
+    """把当前群聊或私聊用户从指定解析器或全部解析器的白名单中移除。"""
+    await _update_access_target(bot, ev, kind="white", action="remove")
+
+
+@sv.on_command("删除解析黑名单", block=False)
+async def remove_parser_blacklist_group(bot: Bot, ev: Event) -> None:
+    """把当前群聊或私聊用户从指定解析器或全部解析器的黑名单中移除。"""
+    await _update_access_target(bot, ev, kind="black", action="remove")

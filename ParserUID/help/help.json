@@ -19,6 +19,24 @@
         "need_ck": false,
         "need_sk": false,
         "need_admin": false
+      },
+      {
+        "name": "删除解析白名单",
+        "desc": "删除解析白名单",
+        "eg": "删除解析白名单",
+        "highlight": 6,
+        "need_ck": false,
+        "need_sk": false,
+        "need_admin": false
+      },
+      {
+        "name": "删除解析黑名单",
+        "desc": "删除解析黑名单",
+        "eg": "删除解析黑名单",
+        "highlight": 6,
+        "need_ck": false,
+        "need_sk": false,
+        "need_admin": false
       }
     ]
   }
