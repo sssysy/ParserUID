@@ -4,8 +4,8 @@
     "data": [
       {
         "name": "添加解析白名单",
-        "desc": "添加解析白名单",
-        "eg": "添加解析白名单",
+        "desc": "把当前会话加入解析白名单，多个解析器用空格分隔",
+        "eg": "添加解析白名单bilibili iwara pixiv x",
         "highlight": 6,
         "need_ck": false,
         "need_sk": false,
@@ -13,8 +13,8 @@
       },
       {
         "name": "添加解析黑名单",
-        "desc": "添加解析黑名单",
-        "eg": "添加解析黑名单",
+        "desc": "把当前会话加入解析黑名单，多个解析器用空格分隔",
+        "eg": "添加解析黑名单bilibili iwara pixiv x",
         "highlight": 6,
         "need_ck": false,
         "need_sk": false,
@@ -22,8 +22,8 @@
       },
       {
         "name": "删除解析白名单",
-        "desc": "删除解析白名单",
-        "eg": "删除解析白名单",
+        "desc": "把当前会话移出解析白名单，多个解析器用空格分隔",
+        "eg": "删除解析白名单bilibili",
         "highlight": 6,
         "need_ck": false,
         "need_sk": false,
@@ -31,8 +31,8 @@
       },
       {
         "name": "删除解析黑名单",
-        "desc": "删除解析黑名单",
-        "eg": "删除解析黑名单",
+        "desc": "把当前会话移出解析黑名单，多个解析器用空格分隔",
+        "eg": "删除解析黑名单bilibili",
         "highlight": 6,
         "need_ck": false,
         "need_sk": false,

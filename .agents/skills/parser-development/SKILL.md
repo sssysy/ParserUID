@@ -4,7 +4,8 @@ description: >
   当用户要求为 ParserUID 新增、重写、审查或调试平台解析器时触发。
   适用于创建解析器包、编写 @handle 链接匹配、实现平台 API 请求、
   构造 Description 与有序媒体结果、调整解析器 config.json、排查注册冲突、
-  在解析器包 __init__.py 中注册命令、编写 help.json 与命令图标，以及修改解析器相关测试。
+  在解析器包 __init__.py 中注册命令、编写 help.json 与命令图标、
+  通过 build_ai_tools() 声明 AI 工具，以及修改解析器相关测试。
 ---
 
 # ParserUID 平台解析器开发
@@ -19,8 +20,12 @@ description: >
 | 新增或重写解析器包、实现 `BaseParser` 与 `@handle` | [references/parser-package.md](references/parser-package.md) |
 | 为解析器包添加 `__init__.py` 命令、登录、刷新或配置操作 | [references/parser-package.md](references/parser-package.md#解析器包内命令__init__py) |
 | 为解析器编写帮助数据（`help.json`）与命令图标（`icon_path/`） | [references/parser-package.md](references/parser-package.md#解析器帮助与命令图标helpjson-与-icon_path) |
+| 为解析器声明 AI 工具（`build_ai_tools()` 与 `AiToolSpec`） | [references/parser-package.md](references/parser-package.md#解析器-ai-工具声明build_ai_tools) |
 | 修改 `config.json`、用户配置和网页配置页字段 | [references/configuration.md](references/configuration.md) |
 | 提交前检查注册、解析、发送、安全和测试 | [references/checklist.md](references/checklist.md) |
+
+当前阶段的 AI 工具采用「解析器声明、插件统一注册」：解析器只返回声明，
+不直接调用 `@ai_tools`，也不修改 `parser.py`。
 
 ## 固定架构
 
@@ -81,12 +86,14 @@ data/ParserUID/addons/parsers/<name>/
 - 返回有序内容列表，列表顺序就是发送顺序。
 - 通过基类的 `result()` 交给 `sender.py` 发送。
 - 失败时抛出 `ParseException` 或其子类，不返回占位媒体。
+- 需要提供 AI 能力时实现 `build_ai_tools()`，只返回 `AiToolSpec` 声明；不自行注册。
 
 解析器不得：
 
 - 直接构造 GsCore `Message` 或 `MessageSegment`。
 - 直接调用 `bot.send()`。
 - 直接导入 `sender.py` 或 `render.py` 完成发送。
+- 直接调用 `@ai_tools` 或在导入阶段注册 AI 工具。
 - 自行实现一套下载器、CookieJar、重试队列或私有缓存目录。
 - 修改其他解析器的请求头、Cookie 或全局状态。
 
@@ -131,6 +138,63 @@ async def login(bot: Bot, ev: Event) -> None: ...
 
 完整规则与示例参见
 [references/parser-package.md](references/parser-package.md#解析器包内命令__init__py)。
+
+## 解析器 AI 工具声明
+
+AI 工具采用「解析器声明、插件统一注册」：解析器在自己的包内实现工具函数并
+返回声明，插件只注册已启用解析器声明过的工具。拆开写在两处是为了让
+`ParserUID/parser.py` 与平台彻底解耦，同时保留启停判断、重名仲裁、
+索引刷新和热重载能力。
+
+解析器侧只需要两步：
+
+```python
+from ...utils.ai_models import AiToolSpec
+
+
+async def get_example_summary(ctx, url: str = "") -> str:
+    """获取示例平台内容摘要。"""
+    ...
+
+
+AI_TOOLS: tuple[AiToolSpec, ...] = (
+    AiToolSpec(
+        func=get_example_summary,
+        category="common",
+        capability_domain="视频解析",
+        covers=("示例平台内容摘要与要点",),
+        aliases=("示例平台·内容摘要",),
+        timeout=90.0,
+    ),
+)
+```
+
+```python
+class ExampleParser(BaseParser):
+    def build_ai_tools(self) -> Sequence[AiToolSpec]:
+        """声明本解析器提供给 AI 的只读工具。"""
+        return AI_TOOLS
+```
+
+约束：
+
+- `BaseParser.build_ai_tools()` 默认返回空元组；平台按需覆写，不要修改基类的默认行为。
+- 解析器不得直接调用 `@ai_tools`。装饰器由插件在注册时统一套用，避免导入阶段
+  产生副作用，也避免未启用解析器暴露工具。
+- 工具只在解析器已启用并进入运行时快照后注册；解析器停用或热重载时工具会同步摘除。
+- 工具名在所有解析器间必须唯一；冲突时保留首个并记录两个平台，不静默覆盖。
+- `category` 建议使用 `common`（主 Agent 按需检索）；不要使用 `self` / `buildin`，
+  插件会将其重定向为 `common`。
+- 工具是只读查询时保持 `code_callable` 默认值；需要发送消息或写入时不要声明为 AI 工具。
+- 工具函数必须 `async`，参数与返回值都要有可追踪的类型注解；不得使用 `Any`。
+- 工具需要定位当前消息里的链接时，从 `RunContext[ToolContext]` 读取 `ev`；
+  不要复用 `parser.py` 的匹配逻辑，也不要修改 `ev`。
+- 工具失败时返回简短、可读的文本给模型，不抛出未处理异常，不暴露 Cookie、签名或堆栈。
+- `visible_when` 必须是廉价的内存判定；无 `deps` 时应返回 `True`，避免后台调用被误隐藏。
+- 第三方解析器同样可以实现 `build_ai_tools()`，无需了解插件注册器内部实现。
+
+完整契约、`Visibility` 写法与验收项参见
+[references/parser-package.md](references/parser-package.md#解析器-ai-工具声明build_ai_tools)。
 
 ## 解析器帮助与命令图标
 

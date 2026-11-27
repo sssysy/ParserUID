@@ -329,6 +329,161 @@ ParserUID/parsers/kugou/
 - 分类描述自动显示为：`由 酷狗音乐 解析器提供的命令`
 - 命令列表与图标自动按配置渲染在分类下方。
 
+## 解析器 AI 工具声明（`build_ai_tools`）
+
+解析器可以向机器人提供只读 AI 工具（例如“获取某平台官方 AI 总结”）。
+采用「解析器声明、插件统一注册」：解析器只返回 `AiToolSpec`，插件扫描
+已启用解析器后统一套用 GsCore 的 `@ai_tools`。
+
+### 1. 职责边界
+
+- **解析器负责**：实现工具函数、声明 `AiToolSpec`、提供 `visible_when` 判定、
+  返回给模型的纯文本。
+- **插件负责**：扫描已启用解析器、校验工具名、注册与摘除、刷新词法索引、
+  按需同步向量库、启动和关闭编排。
+- **`parser.py` 不参与**：不得在入口、注册表或解析器基类之外写平台分支；
+  平台 AI 工具内容只留在解析器包内。
+
+### 2. 最小实现
+
+```text
+ParserUID/parsers/example/
+├── __init__.py
+├── config.json
+├── parser.py
+├── ai_summary.py      # 工具函数与 AI_TOOLS 声明
+└── models.py
+```
+
+`ai_summary.py`：
+
+```python
+from __future__ import annotations
+
+from pydantic_ai import RunContext
+
+from gsuid_core.ai_core.models import ToolContext
+
+from ...utils.ai_models import AiToolSpec
+from ...utils.exceptions import ParseException, sanitize_error_text
+
+
+async def get_example_summary(
+    ctx: RunContext[ToolContext],
+    url: str = "",
+) -> str:
+    """获取示例平台内容的官方摘要。
+
+    用户要求“总结这个链接”且上下文包含示例平台链接时调用。
+
+    Args:
+        url: 示例平台链接；留空时从当前消息提取。
+    """
+    del ctx, url
+    try:
+        return "示例摘要文本"
+    except ParseException as exc:
+        detail = sanitize_error_text(str(exc), hide_local_paths=True)
+        return f"❌ 示例平台摘要获取失败：{detail or '请稍后再试'}"
+
+
+AI_TOOLS: tuple[AiToolSpec, ...] = (
+    AiToolSpec(
+        func=get_example_summary,
+        category="common",
+        capability_domain="视频解析",
+        covers=("示例平台内容摘要与要点",),
+        aliases=("示例平台·内容摘要",),
+        timeout=90.0,
+    ),
+)
+```
+
+`parser.py`：
+
+```python
+from collections.abc import Sequence
+
+from ...utils.ai_models import AiToolSpec
+from .ai_summary import AI_TOOLS
+
+
+class ExampleParser(BaseParser):
+    def build_ai_tools(self) -> Sequence[AiToolSpec]:
+        """声明本解析器提供给 AI 的只读工具。"""
+        return AI_TOOLS
+```
+
+### 3. `AiToolSpec` 字段
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `func` | `Callable[..., Awaitable[str]]` | 必填 | 工具实现；名称取自函数 `__name__` |
+| `category` | `str` | `"common"` | 工具分类；插件会把 `self`/`buildin` 重定向为 `common` |
+| `capability_domain` | `str \| None` | `None` | 能力域，用于能力清单聚合 |
+| `covers` | `tuple[str, ...]` | `()` | 数据/能力覆盖面，写清可查询的内容与范围 |
+| `aliases` | `tuple[str, ...]` | `()` | 领域内同义表述，必须带领域前缀 |
+| `timeout` | `float \| None` | `90.0` | 单次调用超时；长任务可适当放大 |
+| `visible_when` | 判定函数 | `None` | 每步廉价内存判定，返回 `False` 时隐藏 |
+
+### 4. 可见性判定
+
+`visible_when` 只在“上下文确实出现该平台线索”时暴露工具，避免每轮占用 schema。
+判定必须廉价、无 I/O，并在无 `deps` 时返回 `True`：
+
+```python
+from typing import Protocol, Iterator
+from collections.abc import Sequence
+
+from gsuid_core.ai_core.models import ToolContext
+
+
+class _ScanCtx(Protocol):
+    @property
+    def deps(self) -> ToolContext | None: ...
+
+    @property
+    def messages(self) -> Sequence[object]: ...
+
+
+def _iter_texts(ctx: _ScanCtx) -> Iterator[str]:
+    ev = ctx.deps.ev if ctx.deps is not None else None
+    if ev is not None:
+        yield ev.raw_text
+    for message in ctx.messages:
+        yield str(message)
+
+
+def _mentions_example(ctx: _ScanCtx) -> bool:
+    if ctx.deps is None:
+        return True
+    return any("example.com" in text for text in _iter_texts(ctx))
+```
+
+### 5. 规则
+
+- 解析器不得直接调用 `@ai_tools`；由插件统一注册，避免导入副作用。
+- 不得在 `parser.py`、`parsers/__init__.py` 或平台清单中写 AI 工具注册。
+- 工具名全局唯一；冲突时插件保留首个并记录两个平台，不静默覆盖。
+- 工具只注册已启用解析器；停用、删除或热重载后同步摘除。
+- 工具函数必须异步并带类型注解；不得使用 `Any`、`cast`、`type: ignore`。
+- 需要当前消息时从 `RunContext[ToolContext].deps.ev` 读取；不得改写 `ev`。
+- 需要解析器实例时使用 `await ParserClass.active_instance()`；不要新建实例。
+- 工具只返回纯文本；不要用工具发送消息、图片或文件。
+- 失败返回简短可读文本；日志不记录 Cookie、签名、完整 URL 查询参数或原始响应。
+- 复用平台的下载、会话与缓存能力；不要在工具里另起网络栈或落盘路径。
+- 第三方解析器同样实现 `build_ai_tools()`，导入方式按自身加载命名空间处理。
+
+### 6. 验证
+
+至少覆盖：
+
+1. 解析器启用后工具被注册，名称为函数名，分类与插件一致。
+2. 解析器停用或未进入快照时不注册，也不残留旧工具。
+3. 重复工具名被拒绝，且不影响首个工具。
+4. `visible_when` 在无平台线索与无 `deps` 场景下的行为符合预期。
+5. 工具调用链路的返回值经过 `sanitize_error_text`，不泄漏敏感信息。
+
 ## `@handle` 规则
 
 - 第一个参数是低成本预筛选关键词。

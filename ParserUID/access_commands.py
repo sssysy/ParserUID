@@ -27,6 +27,15 @@ AccessListKind = Literal["white", "black"]
 AccessAction = Literal["add", "remove"]
 
 
+def _split_parser_names(raw: str) -> list[str]:
+    """按空白拆分解析器名，并保持顺序去重。"""
+    names: list[str] = []
+    for name in raw.split():
+        if name not in names:
+            names.append(name)
+    return names
+
+
 def _scan_manifests() -> dict[str, ParserManifest]:
     manifests: dict[str, ParserManifest] = {}
     for root_dir in (get_builtin_parsers_dir(), get_thirdparty_parsers_dir()):
@@ -68,13 +77,14 @@ def _update_target_in_lists(
     action: AccessAction,
     is_private: bool = False,
 ) -> tuple[int, str | None]:
-    if parser_name:
-        manifest = manifests.get(parser_name)
-        if manifest is None:
-            return 0, parser_name
-        targets = [manifest]
-    else:
+    parser_names = _split_parser_names(parser_name)
+    if not parser_names:
         targets = list(manifests.values())
+    else:
+        missing = [name for name in parser_names if name not in manifests]
+        if missing:
+            return 0, "、".join(missing)
+        targets = [manifests[name] for name in parser_names]
 
     for manifest in targets:
         config = load_parser_user_config(manifest)
@@ -141,7 +151,8 @@ async def _update_access_target(
         await bot.send("未获取到当前会话标识，无法更新名单")
         return
 
-    parser_name = " ".join(ev.text.split())
+    parser_names = _split_parser_names(ev.text)
+    parser_name = " ".join(parser_names)
     try:
         manifests = await asyncio.to_thread(_scan_manifests)
         _count, missing = await asyncio.to_thread(
@@ -167,7 +178,7 @@ async def _update_access_target(
     scope_label = "私聊" if is_private else "群聊"
     target_label = f"私聊用户 {target_id}" if is_private else f"群聊 {target_id}"
     list_label = f"{scope_label}白名单" if kind == "white" else f"{scope_label}黑名单"
-    target = parser_name or "全部解析器"
+    target = "、".join(parser_names) or "全部解析器"
     if action == "add":
         await bot.send(f"已将{target_label} 添加到 {target} 的{list_label}")
     else:
@@ -179,23 +190,23 @@ sv = SV("ParserUID 解析器名单", pm=0, area="ALL")
 
 @sv.on_command("添加解析白名单", block=False)
 async def add_parser_whitelist_group(bot: Bot, ev: Event) -> None:
-    """把当前群聊或私聊用户加入指定解析器或全部解析器的白名单。"""
+    """把当前群聊或私聊用户加入指定解析器或全部解析器的白名单，多个解析器用空格分隔。"""
     await _update_access_target(bot, ev, kind="white", action="add")
 
 
 @sv.on_command("添加解析黑名单", block=False)
 async def add_parser_blacklist_group(bot: Bot, ev: Event) -> None:
-    """把当前群聊或私聊用户加入指定解析器或全部解析器的黑名单。"""
+    """把当前群聊或私聊用户加入指定解析器或全部解析器的黑名单，多个解析器用空格分隔。"""
     await _update_access_target(bot, ev, kind="black", action="add")
 
 
 @sv.on_command("删除解析白名单", block=False)
 async def remove_parser_whitelist_group(bot: Bot, ev: Event) -> None:
-    """把当前群聊或私聊用户从指定解析器或全部解析器的白名单中移除。"""
+    """把当前群聊或私聊用户从指定解析器或全部解析器的白名单中移除，多个解析器用空格分隔。"""
     await _update_access_target(bot, ev, kind="white", action="remove")
 
 
 @sv.on_command("删除解析黑名单", block=False)
 async def remove_parser_blacklist_group(bot: Bot, ev: Event) -> None:
-    """把当前群聊或私聊用户从指定解析器或全部解析器的黑名单中移除。"""
+    """把当前群聊或私聊用户从指定解析器或全部解析器的黑名单中移除，多个解析器用空格分隔。"""
     await _update_access_target(bot, ev, kind="black", action="remove")
