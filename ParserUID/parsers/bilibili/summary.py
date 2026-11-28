@@ -218,6 +218,7 @@ def _truncate(text: str, limit: int) -> str:
 
 def format_video_summary_text(result: BiliVideoSummaryResult) -> str:
     """生成供 AI 助手阅读与总结的结构化纯文本。"""
+    has_official_summary = bool(result.summary or result.outline)
     lines: list[str] = [
         f"视频标题：{result.title}",
         f"UP主：{result.author_name}",
@@ -229,7 +230,9 @@ def format_video_summary_text(result: BiliVideoSummaryResult) -> str:
     if result.duration > 0:
         lines.append(f"时长：{format_seconds(result.duration)}")
 
-    if result.status_code == 0 and result.data_code == 0 and (result.summary or result.outline):
+    if result.status_code == 0 and result.data_code == 0 and has_official_summary:
+        lines.append("")
+        lines.append("【官方 AI 总结可用性】可用：以下为 B 站官方 AI 总结原文")
         if result.summary:
             lines.append("")
             lines.append("【B站官方 AI 总结】")
@@ -247,7 +250,11 @@ def format_video_summary_text(result: BiliVideoSummaryResult) -> str:
                         lines.append(f"  · [{format_seconds(part.timestamp)}] {part_content}")
     else:
         lines.append("")
-        lines.append(f"【B站官方 AI 总结状态】{result.status_message}")
+        lines.append(
+            "【官方 AI 总结可用性】不可用：未取得 B 站官方 AI 总结。"
+            "以下只有视频基础信息和简介，不能称为官方 AI 总结，也不能仅凭它们推断视频正文"
+        )
+        lines.append(f"【官方 AI 总结不可用原因】{result.status_message}")
         if result.subtitle_text:
             lines.append("")
             lines.append("【AI 识别字幕】")
@@ -255,7 +262,13 @@ def format_video_summary_text(result: BiliVideoSummaryResult) -> str:
 
     if result.desc:
         lines.append("")
-        lines.append("【视频简介】")
+        if has_official_summary:
+            lines.append("【视频简介（非 AI 总结）】")
+        else:
+            lines.append("【视频简介（非官方 AI 总结，仅供区分事实来源）】")
         lines.append(_truncate(result.desc, SUMMARY_DESC_MAX_CHARS))
+    elif not has_official_summary:
+        lines.append("")
+        lines.append("【视频简介】无：该视频未填写简介")
 
     return "\n".join(lines)

@@ -65,18 +65,18 @@ def _event_text_candidates(ev: object) -> list[str]:
     return texts
 
 
-def _target_from_context(ctx: RunContext[ToolContext], url: str) -> str:
+def _target_from_context(ctx: RunContext[ToolContext], url: str) -> str | None:
     target = url.strip()
     if target:
         return target
     ev = ctx.deps.ev
     if ev is None:
-        return ""
+        return None
     for text in _event_text_candidates(ev):
         found = extract_first_bilibili_url(text)
         if found is not None:
             return found
-    return ev.raw_text.strip()
+    return extract_first_bilibili_url(ev.raw_text)
 
 
 async def get_bilibili_ai_summary(
@@ -87,16 +87,20 @@ async def get_bilibili_ai_summary(
     """获取哔哩哔哩视频的官方 AI 总结。
 
     用户要求“总结这个 B 站视频”“这个视频讲了什么”且上下文带有哔哩哔哩
-    链接、BV 号或 AV 号时调用。返回 B 站官方 AI 总结、章节大纲、视频简介；
-    若该视频没有官方总结，会返回原因与可用的视频基础信息。
+    链接、BV 号或 AV 号时调用。返回格式会明确标注“官方 AI 总结可用性”：
+    可用时返回官方总结与章节大纲；不可用时说明原因，并注明后续内容只是
+    视频基础信息和简介，不得对外称为官方 AI 总结，也不得据此推断视频正文。
 
     Args:
         url: 哔哩哔哩视频链接、b23.tv 短链、BV 号或 AV 号；留空时从当前消息提取。
         page: 分 P 序号，从 1 开始；0 表示使用链接中的 p 参数或第 1 集。
     """
     target = _target_from_context(ctx, url)
-    if not target:
-        return "❌ 请提供哔哩哔哩视频链接、b23.tv 短链、BV 号或 AV 号"
+    if target is None:
+        return (
+            "❌ 当前上下文没有哔哩哔哩视频链接、BV 号或 AV 号。"
+            "只能看到视频简介时无法获取官方 AI 总结，不能把简介当作总结"
+        )
 
     from .parser import BilibiliParser
 
